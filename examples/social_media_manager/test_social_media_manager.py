@@ -230,3 +230,49 @@ def test_get_platform_dry_run_inherits_char_limit():
     plat = get_platform("mastodon", dry_run=True)
     assert isinstance(plat, DryRunPlatform)
     assert plat.char_limit == 500
+    assert get_platform("instagram", dry_run=True).char_limit == 2200
+
+
+def test_meta_platforms_require_credentials(monkeypatch):
+    import platforms as platforms_mod
+
+    for var in (
+        "FACEBOOK_PAGE_ID",
+        "FACEBOOK_PAGE_ACCESS_TOKEN",
+        "INSTAGRAM_USER_ID",
+        "INSTAGRAM_ACCESS_TOKEN",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    import pytest
+
+    with pytest.raises(platforms_mod.PlatformError):
+        platforms_mod.FacebookPlatform()
+    with pytest.raises(platforms_mod.PlatformError):
+        platforms_mod.InstagramPlatform()
+
+
+def test_instagram_rejects_missing_or_local_photo(monkeypatch):
+    import platforms as platforms_mod
+
+    monkeypatch.setenv("INSTAGRAM_USER_ID", "123")
+    monkeypatch.setenv("INSTAGRAM_ACCESS_TOKEN", "tok")
+    plat = platforms_mod.InstagramPlatform()
+
+    # No photo: Instagram can't post text-only — fails before any HTTP call
+    result = plat.publish("hola")
+    assert not result.ok
+    assert "requires a photo" in result.error
+
+    # Local file: the Graph API only fetches public URLs
+    result = plat.publish("hola", image_path="/tmp/foto.jpg")
+    assert not result.ok
+    assert "publicly accessible" in result.error
+
+
+def test_is_url():
+    import platforms as platforms_mod
+
+    assert platforms_mod.is_url("https://example.com/a.jpg")
+    assert platforms_mod.is_url("http://example.com/a.jpg")
+    assert not platforms_mod.is_url("/home/user/a.jpg")
+    assert not platforms_mod.is_url("a.jpg")

@@ -12,6 +12,10 @@ Built-in adapters:
 * ``TwitterPlatform`` — X/Twitter API v2 (media upload via v1.1),
   reusing the OAuth 1.0a signer from ``openjarvis.channels.twitter_channel``.
 * ``MastodonPlatform`` — via Mastodon.py (supports media attachments).
+* ``FacebookPlatform`` — Facebook Page posts via the Meta Graph API
+  (text and photos; local files or public URLs).
+* ``InstagramPlatform`` — Instagram professional accounts via the Meta
+  Graph API (photo posts only; images must be public URLs).
 * ``DryRunPlatform`` — prints what would be posted; used by ``--dry-run``
   and demo mode so the agent is testable without any credentials.
 """
@@ -24,6 +28,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
+
+GRAPH_API = "https://graph.facebook.com/v21.0"
+
+
+def is_url(path: str) -> bool:
+    return path.startswith(("http://", "https://"))
 
 
 @dataclass
@@ -186,6 +196,239 @@ class MastodonPlatform:
             return None
 
 
+class FacebookPlatform:
+    """Facebook Page adapter via the Meta Graph API.
+
+    Posts to a Page you manage (personal profiles can't be automated).
+    Photos can be local files (uploaded directly) or public URLs.
+
+    Required env vars:
+      FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN
+    (a Page access token with pages_manage_posts; add read_insights
+    for impression metrics)
+    """
+
+    name = "facebook"
+    # Generation cap, not the API maximum (63k) — keeps posts readable.
+    char_limit = 2200
+
+    def __init__(self) -> None:
+        self._page_id = os.environ.get("FACEBOOK_PAGE_ID", "")
+        self._token = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN", "")
+        if not self._page_id or not self._token:
+            raise PlatformError(
+                "Facebook credentials missing — set FACEBOOK_PAGE_ID"
+                " and FACEBOOK_PAGE_ACCESS_TOKEN (a Page access token)"
+            )
+
+    def publish(self, text: str, image_path: Optional[str] = None) -> PostResult:
+        import httpx
+
+        try:
+            if image_path:
+                data = {"message": text, "access_token": self._token}
+                if is_url(image_path):
+                    data["url"] = image_path
+                    resp = httpx.post(
+                        f"{GRAPH_API}/{self._page_id}/photos",
+                        data=data,
+                        timeout=60.0,
+                    )
+                else:
+                    path = Path(image_path)
+                    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+                    with path.open("rb") as f:
+                        resp = httpx.post(
+                            f"{GRAPH_API}/{self._page_id}/photos",
+                            data=data,
+                            files={"source": (path.name, f, mime)},
+                            timeout=120.0,
+                        )
+            else:
+                resp = httpx.post(
+                    f"{GRAPH_API}/{self._page_id}/feed",
+                    data={"message": text, "access_token": self._token},
+                    timeout=30.0,
+                )
+            if resp.status_code != 200:
+                return PostResult(
+                    ok=False, error=f"HTTP {resp.status_code}: {resp.text[:200]}"
+                )
+            body = resp.json()
+            # /photos returns {"id": photo_id, "post_id": page_postid};
+            # the feed post id is the one metrics are read from.
+            post_id = body.get("post_id") or body.get("id", "")
+            return PostResult(
+                ok=True,
+                remote_id=post_id,
+                url=f"https://www.facebook.com/{post_id}",
+            )
+        except Exception as exc:
+            return PostResult(ok=False, error=str(exc))
+
+    def fetch_metrics(self, remote_id: str) -> Optional[Dict[str, int]]:
+        import httpx
+
+        try:
+            resp = httpx.get(
+                f"{GRAPH_API}/{remote_id}",
+                params={
+                    "fields": "reactions.summary(true),comments.summary(true),shares",
+                    "access_token": self._token,
+                },
+                timeout=15.0,
+            )
+            if resp.status_code != 200:
+                return None
+            body = resp.json()
+            metrics = {
+                "likes": body.get("reactions", {})
+                .get("summary", {})
+                .get("total_count", 0),
+                "shares": body.get("shares", {}).get("count", 0),
+                "replies": body.get("comments", {})
+                .get("summary", {})
+                .get("total_count", 0),
+                "impressions": 0,
+            }
+            # Impressions need the read_insights permission; best-effort.
+            ins = httpx.get(
+                f"{GRAPH_API}/{remote_id}/insights",
+                params={
+                    "metric": "post_impressions",
+                    "access_token": self._token,
+                },
+                timeout=15.0,
+            )
+            if ins.status_code == 200:
+                for entry in ins.json().get("data", []):
+                    values = entry.get("values") or [{}]
+                    metrics["impressions"] = int(values[0].get("value") or 0)
+            return metrics
+        except Exception:
+            return None
+
+
+class InstagramPlatform:
+    """Instagram adapter via the Meta Graph API (content publishing).
+
+    Needs an Instagram *professional* (business/creator) account linked
+    to a Facebook Page. Two API constraints to know about:
+
+    * every post MUST have a photo (no text-only posts), and
+    * the photo must be a publicly accessible URL — Meta fetches it
+      server-side. Local files are rejected with a clear error; host
+      the image somewhere public (or pass an https:// URL as the photo).
+
+    Required env vars:
+      INSTAGRAM_USER_ID (the IG professional account id),
+      INSTAGRAM_ACCESS_TOKEN (a token with instagram_content_publish)
+    """
+
+    name = "instagram"
+    char_limit = 2200
+
+    def __init__(self) -> None:
+        self._user_id = os.environ.get("INSTAGRAM_USER_ID", "")
+        self._token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+        if not self._user_id or not self._token:
+            raise PlatformError(
+                "Instagram credentials missing — set INSTAGRAM_USER_ID"
+                " and INSTAGRAM_ACCESS_TOKEN"
+            )
+
+    def publish(self, text: str, image_path: Optional[str] = None) -> PostResult:
+        if not image_path:
+            return PostResult(
+                ok=False,
+                error="Instagram requires a photo — schedule this post"
+                " with an image or use another platform",
+            )
+        if not is_url(image_path):
+            return PostResult(
+                ok=False,
+                error="Instagram's API only accepts publicly accessible"
+                f" image URLs, got local file {image_path!r} — upload it"
+                " somewhere public and use the https:// URL",
+            )
+        import httpx
+
+        try:
+            create = httpx.post(
+                f"{GRAPH_API}/{self._user_id}/media",
+                data={
+                    "image_url": image_path,
+                    "caption": text,
+                    "access_token": self._token,
+                },
+                timeout=60.0,
+            )
+            if create.status_code != 200:
+                return PostResult(
+                    ok=False,
+                    error=f"container HTTP {create.status_code}: {create.text[:200]}",
+                )
+            creation_id = create.json()["id"]
+            publish = httpx.post(
+                f"{GRAPH_API}/{self._user_id}/media_publish",
+                data={"creation_id": creation_id, "access_token": self._token},
+                timeout=60.0,
+            )
+            if publish.status_code != 200:
+                return PostResult(
+                    ok=False,
+                    error=f"publish HTTP {publish.status_code}: {publish.text[:200]}",
+                )
+            media_id = publish.json()["id"]
+            permalink = ""
+            link = httpx.get(
+                f"{GRAPH_API}/{media_id}",
+                params={"fields": "permalink", "access_token": self._token},
+                timeout=15.0,
+            )
+            if link.status_code == 200:
+                permalink = link.json().get("permalink", "")
+            return PostResult(ok=True, remote_id=media_id, url=permalink)
+        except Exception as exc:
+            return PostResult(ok=False, error=str(exc))
+
+    def fetch_metrics(self, remote_id: str) -> Optional[Dict[str, int]]:
+        import httpx
+
+        try:
+            resp = httpx.get(
+                f"{GRAPH_API}/{remote_id}",
+                params={
+                    "fields": "like_count,comments_count",
+                    "access_token": self._token,
+                },
+                timeout=15.0,
+            )
+            if resp.status_code != 200:
+                return None
+            body = resp.json()
+            metrics = {
+                "likes": body.get("like_count", 0),
+                "shares": 0,  # not exposed for IG media
+                "replies": body.get("comments_count", 0),
+                "impressions": 0,
+            }
+            # views replaced impressions in recent API versions; try both.
+            for metric_name in ("views", "impressions"):
+                ins = httpx.get(
+                    f"{GRAPH_API}/{remote_id}/insights",
+                    params={"metric": metric_name, "access_token": self._token},
+                    timeout=15.0,
+                )
+                if ins.status_code == 200 and ins.json().get("data"):
+                    values = ins.json()["data"][0].get("values") or [{}]
+                    metrics["impressions"] = int(values[0].get("value") or 0)
+                    break
+            return metrics
+        except Exception:
+            return None
+
+
 class DryRunPlatform:
     """Prints the post instead of publishing. No credentials needed.
 
@@ -223,6 +466,8 @@ _PLATFORMS = {
     "twitter": TwitterPlatform,
     "x": TwitterPlatform,
     "mastodon": MastodonPlatform,
+    "facebook": FacebookPlatform,
+    "instagram": InstagramPlatform,
 }
 
 

@@ -3,8 +3,8 @@
 An AI agent that runs your social media accounts end to end, on your own
 machine:
 
-- **Posts messages and photos** to X/Twitter and Mastodon (photo captions are
-  written by the AI).
+- **Posts messages and photos** to X/Twitter, Instagram, Facebook Pages, and
+  Mastodon (photo captions are written by the AI).
 - **Rides trends** — pulls Google Trends and Hacker News, scores each topic
   for relevance to *your* niche with the local model.
 - **Plans a content calendar** — mixes trend-riding and evergreen posts and
@@ -21,7 +21,7 @@ machine:
 | `social_media_manager.py` | CLI entry point (`trends`, `plan`, `post`, `run`, `report`, `status`) |
 | `content.py` | Brand profile + LLM content generation and evaluation |
 | `trends.py` | Trend fetching (Google Trends RSS, Hacker News) and niche ranking |
-| `platforms.py` | Twitter/X and Mastodon adapters (text + photo) and dry-run mode |
+| `platforms.py` | Twitter/X, Instagram, Facebook, and Mastodon adapters (text + photo) and dry-run mode |
 | `store.py` | SQLite state: calendar, history, metrics, trend log |
 | `profile.example.toml` | Brand profile template — copy to `profile.toml` |
 | `test_social_media_manager.py` | Offline tests (no network/engine needed) |
@@ -65,10 +65,27 @@ export TWITTER_API_KEY=...        TWITTER_API_SECRET=...
 export TWITTER_ACCESS_TOKEN=...   TWITTER_ACCESS_SECRET=...
 export TWITTER_BEARER_TOKEN=...   # read-side, used for metrics
 
+# Facebook Page (Meta Graph API — Page access token with pages_manage_posts;
+# add read_insights to also get impression metrics)
+export FACEBOOK_PAGE_ID=...
+export FACEBOOK_PAGE_ACCESS_TOKEN=...
+
+# Instagram (professional account linked to a Facebook Page; token with
+# instagram_content_publish)
+export INSTAGRAM_USER_ID=...
+export INSTAGRAM_ACCESS_TOKEN=...
+
 # Mastodon (needs: pip install Mastodon.py)
 export MASTODON_API_BASE_URL=https://mastodon.social
 export MASTODON_ACCESS_TOKEN=...
 ```
+
+**Instagram caveats** (Meta API rules, not ours): every post must include a
+photo, and the image must be a *publicly accessible URL* — Meta's servers
+fetch it. So for Instagram pass `--photo https://...` (or schedule posts whose
+`image_path` is a URL); local files are rejected with a clear error. Facebook
+accepts both local files and URLs, and personal profiles can't be automated —
+only Pages you manage.
 
 ### Photos
 
@@ -98,9 +115,10 @@ uv run pytest examples/social_media_manager/ -v
 
 ## En español — resumen rápido
 
-Este agente lleva el control de tus redes sociales: detecta tendencias y las
-puntúa según tu nicho, planifica un calendario de contenido, redacta y publica
-mensajes y fotos (les escribe el pie de foto), mide likes/compartidos/respuestas,
+Este agente lleva el control de tus redes sociales (X/Twitter, Instagram,
+Facebook y Mastodon): detecta tendencias y las puntúa según tu nicho, planifica
+un calendario de contenido, redacta y publica mensajes y fotos (les escribe el
+pie de foto), mide likes/compartidos/respuestas,
 te entrega un informe semanal con recomendaciones, y registra todo en una base
 de datos local. Configura tu marca en `profile.toml` (idioma `es` para que
 publique en español), prueba primero con `--dry-run`, y automatízalo con

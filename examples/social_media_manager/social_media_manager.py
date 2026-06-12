@@ -270,9 +270,10 @@ def _calendar_slots(p: Profile, days: int) -> list:
 @click.option("--text", default=None, help="Exact text to post (skips the AI).")
 @click.option(
     "--photo",
-    type=click.Path(exists=True),
     default=None,
-    help="Photo to attach (AI writes the caption if no text given).",
+    help="Photo to attach: a local file, or an https:// URL "
+    "(Instagram only accepts public URLs). AI writes the caption "
+    "if no text is given.",
 )
 @click.option(
     "--platform",
@@ -292,6 +293,8 @@ def post(
     p = ctx.profile
     if not any((topic, text, photo)):
         raise click.ClickException("give me --topic, --text, or --photo")
+    if photo and not platforms_mod.is_url(photo) and not Path(photo).exists():
+        raise click.ClickException(f"photo not found: {photo}")
     platform_name = platform_name or (p.platforms[0] if p.platforms else "twitter")
     plat = ctx.platform(platform_name)
 
@@ -374,7 +377,11 @@ def run(ctx: Ctx) -> None:
 
 def _publish(ctx: Ctx, record: Post, plat) -> None:
     """Publish one record, persist the outcome, archive the photo."""
-    if record.image_path and not Path(record.image_path).exists():
+    if (
+        record.image_path
+        and not platforms_mod.is_url(record.image_path)
+        and not Path(record.image_path).exists()
+    ):
         ctx.store.mark_failed(record.id, f"photo missing: {record.image_path}")
         click.echo(f"  [fail] {record.id}: photo missing {record.image_path}")
         return
