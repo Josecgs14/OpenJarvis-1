@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import array
 import logging
 import subprocess
-import wave
-from io import BytesIO
 from unittest.mock import patch
 
 from openjarvis.voice.termux_audio import (
@@ -15,17 +12,6 @@ from openjarvis.voice.termux_audio import (
     termux_api_available,
     termux_audio_source,
 )
-
-
-def _wav_bytes(amplitude: int, n: int = 16000, sample_rate: int = 16000) -> bytes:
-    pcm = array.array("h", [amplitude] * n).tobytes()
-    buf = BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm)
-    return buf.getvalue()
 
 
 class TestIsTermux:
@@ -57,14 +43,16 @@ class TestTermuxApiAvailable:
 
 
 class TestTermuxAudioSource:
-    def test_yields_recorded_pcm(self):
-        wav_payload = _wav_bytes(1000, n=8000)
+    def test_yields_recorded_clip(self):
+        # termux-microphone-record always produces an MP4/AAC container,
+        # regardless of the requested filename/extension.
+        clip_bytes = b"\x00\x00\x00\x18ftypmp42" + b"...rest of the clip..."
 
         def _fake_run(cmd, **kwargs):
             if "-f" in cmd:
                 path = cmd[cmd.index("-f") + 1]
                 with open(path, "wb") as f:
-                    f.write(wav_payload)
+                    f.write(clip_bytes)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         run_patch = patch(
@@ -76,21 +64,7 @@ class TestTermuxAudioSource:
             chunk = next(gen)
             gen.close()
 
-        with wave.open(BytesIO(wav_payload), "rb") as wf:
-            expected_pcm = wf.readframes(wf.getnframes())
-
-        assert chunk == expected_pcm
-
-    def test_missing_recording_yields_empty_bytes(self):
-        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
-        with patch(
-            "openjarvis.voice.termux_audio.subprocess.run", return_value=ok
-        ), patch("openjarvis.voice.termux_audio.time.sleep"):
-            gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
-            chunk = next(gen)
-            gen.close()
-
-        assert chunk == b""
+        assert chunk == clip_bytes
 
     def test_warns_when_recording_command_fails(self, caplog):
         failed = subprocess.CompletedProcess(
@@ -99,7 +73,9 @@ class TestTermuxAudioSource:
         with patch(
             "openjarvis.voice.termux_audio.subprocess.run", return_value=failed
         ), patch("openjarvis.voice.termux_audio.time.sleep"):
-            with caplog.at_level(logging.WARNING, logger="openjarvis.voice.termux_audio"):
+            with caplog.at_level(
+                logging.WARNING, logger="openjarvis.voice.termux_audio"
+            ):
                 gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
                 chunk = next(gen)
                 gen.close()
@@ -108,19 +84,13 @@ class TestTermuxAudioSource:
         assert any("Permission denial" in r.message for r in caplog.records)
 
     def test_warns_on_empty_recording(self, caplog):
-        wav_payload = _wav_bytes(0, n=0)
-
-        def _fake_run(cmd, **kwargs):
-            if "-f" in cmd:
-                path = cmd[cmd.index("-f") + 1]
-                with open(path, "wb") as f:
-                    f.write(wav_payload)
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch(
-            "openjarvis.voice.termux_audio.subprocess.run", side_effect=_fake_run
+            "openjarvis.voice.termux_audio.subprocess.run", return_value=ok
         ), patch("openjarvis.voice.termux_audio.time.sleep"):
-            with caplog.at_level(logging.WARNING, logger="openjarvis.voice.termux_audio"):
+            with caplog.at_level(
+                logging.WARNING, logger="openjarvis.voice.termux_audio"
+            ):
                 gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
                 chunk = next(gen)
                 gen.close()

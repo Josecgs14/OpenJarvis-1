@@ -37,6 +37,15 @@ class ListenerConfig:
     max_utterance_seconds: float = 15.0
     sample_rate: int = SAMPLE_RATE
     chunk_seconds: float = CHUNK_SECONDS  # duration of each audio_source chunk
+    # When False, the audio source yields complete, pre-segmented utterances
+    # (e.g. short compressed clips) instead of a continuous PCM stream, so
+    # energy-based VAD is skipped and each chunk is transcribed as-is —
+    # used for Termux, where the mic can only be recorded in short clips.
+    vad: bool = True
+    # Format of the audio yielded by audio_source, passed to
+    # speech_backend.transcribe(). Only relevant when vad is False — VAD
+    # chunks are always wrapped as "wav" via pcm16_to_wav.
+    audio_format: str = "wav"
 
 
 def pcm16_to_wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -141,6 +150,16 @@ class WakeWordListener:
         play_audio = self._play_audio or self._default_play_audio
 
         cfg = self._config
+
+        if not cfg.vad:
+            for chunk in audio_source:
+                if self._stop:
+                    break
+                if not chunk:
+                    continue
+                self._handle_utterance(chunk, play_audio, format=cfg.audio_format)
+            return
+
         silence_chunks_limit = max(1, int(cfg.silence_duration / cfg.chunk_seconds))
         max_chunks = max(1, int(cfg.max_utterance_seconds / cfg.chunk_seconds))
 
@@ -168,19 +187,22 @@ class WakeWordListener:
             silence_chunks = 0 if is_speech else silence_chunks + 1
 
             if silence_chunks >= silence_chunks_limit or total_chunks >= max_chunks:
-                utterance = bytes(buffer)
+                wav = pcm16_to_wav(bytes(buffer), cfg.sample_rate)
                 buffer = bytearray()
                 speaking = False
                 silence_chunks = 0
                 total_chunks = 0
-                self._handle_utterance(utterance, play_audio)
+                self._handle_utterance(wav, play_audio, format="wav")
 
     def _handle_utterance(
-        self, pcm: bytes, play_audio: Callable[[bytes, str], None]
+        self,
+        audio: bytes,
+        play_audio: Callable[[bytes, str], None],
+        *,
+        format: str = "wav",
     ) -> None:
-        wav = pcm16_to_wav(pcm, self._config.sample_rate)
         try:
-            result = self._speech_backend.transcribe(wav, format="wav")
+            result = self._speech_backend.transcribe(audio, format=format)
         except Exception:
             logger.exception("Transcription failed")
             return

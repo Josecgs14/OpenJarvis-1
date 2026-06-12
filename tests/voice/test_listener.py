@@ -212,3 +212,45 @@ class TestWakeWordListenerRun:
         listener.run()  # should not raise
 
         on_command.assert_called_once()
+
+
+class TestWakeWordListenerNonVad:
+    """Tests for `vad=False` mode (e.g. Termux: pre-segmented clips)."""
+
+    def _config(self) -> ListenerConfig:
+        return ListenerConfig(vad=False, audio_format="m4a")
+
+    def test_transcribes_each_chunk_directly(self):
+        speech_backend = MagicMock()
+        speech_backend.transcribe.return_value = TranscriptionResult(
+            text="Hola Claude dime la hora"
+        )
+        on_command = MagicMock(return_value="Son las tres")
+
+        listener = WakeWordListener(
+            speech_backend=speech_backend,
+            on_command=on_command,
+            config=self._config(),
+            audio_source=iter([b"clip-bytes"]),
+        )
+
+        listener.run()
+
+        speech_backend.transcribe.assert_called_once_with(b"clip-bytes", format="m4a")
+        on_command.assert_called_once_with("dime la hora")
+
+    def test_skips_empty_chunks(self):
+        speech_backend = MagicMock()
+        on_command = MagicMock()
+
+        listener = WakeWordListener(
+            speech_backend=speech_backend,
+            on_command=on_command,
+            config=self._config(),
+            audio_source=iter([b"", b""]),
+        )
+
+        listener.run()
+
+        speech_backend.transcribe.assert_not_called()
+        on_command.assert_not_called()

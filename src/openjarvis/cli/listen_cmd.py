@@ -194,7 +194,8 @@ def listen(
     if use_termux:
         from openjarvis.voice.termux_audio import termux_audio_source
 
-        listener_config.chunk_seconds = config.voice.termux_chunk_seconds
+        listener_config.vad = False
+        listener_config.audio_format = "m4a"
         audio_source = termux_audio_source(
             chunk_seconds=config.voice.termux_chunk_seconds,
             sample_rate=listener_config.sample_rate,

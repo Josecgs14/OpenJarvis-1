@@ -4,9 +4,13 @@ Termux cannot use PortAudio/``sounddevice`` for continuous microphone
 streaming, so ``jarvis listen`` falls back to the Termux:API command-line
 tools when run inside Termux (detected via :func:`is_termux`):
 
-- Capture: :func:`termux_audio_source` records short WAV clips with
-  ``termux-microphone-record`` and yields their raw PCM frames, acting as
-  an ``audio_source`` for :class:`~openjarvis.voice.listener.WakeWordListener`.
+- Capture: :func:`termux_audio_source` records short AAC/M4A clips with
+  ``termux-microphone-record`` and yields their raw bytes, acting as an
+  ``audio_source`` for :class:`~openjarvis.voice.listener.WakeWordListener`
+  in non-VAD mode (each clip is transcribed directly, e.g. via OpenAI
+  Whisper which accepts ``m4a``). Android's ``MediaRecorder`` — which backs
+  ``termux-microphone-record`` — cannot produce raw PCM/WAV, only
+  compressed formats, so streaming energy-based VAD isn't possible here.
 - Spoken replies: :class:`TermuxTTSBackend` speaks text via
   ``termux-tts-speak`` — Android's built-in text-to-speech engine. No extra
   Python packages or API keys are required.
@@ -23,7 +27,6 @@ import shutil
 import subprocess
 import tempfile
 import time
-import wave
 from typing import Any, Iterator
 
 from openjarvis.speech.tts import TTSResult
@@ -46,14 +49,17 @@ def termux_api_available() -> bool:
 def termux_audio_source(
     chunk_seconds: float = 4.0, sample_rate: int = 16000
 ) -> Iterator[bytes]:
-    """Yield mono 16-bit PCM chunks recorded via ``termux-microphone-record``.
+    """Yield short AAC-encoded clips recorded via ``termux-microphone-record``.
 
-    Each iteration records a ``chunk_seconds``-long WAV clip to a temporary
-    file using the phone's microphone (via Termux:API) and yields its raw
-    PCM frames. Runs until the caller stops iterating.
+    Each iteration records a ``chunk_seconds``-long clip to a temporary file
+    using the phone's microphone (via Termux:API) and yields its raw bytes
+    (an MP4/M4A container with AAC audio — ``termux-microphone-record``
+    cannot produce raw PCM/WAV). Each clip is a self-contained utterance
+    suitable for direct transcription with ``format="m4a"``. Runs until the
+    caller stops iterating.
     """
     while True:
-        fd, path = tempfile.mkstemp(suffix=".wav", prefix="jarvis-listen-")
+        fd, path = tempfile.mkstemp(suffix=".m4a", prefix="jarvis-listen-")
         os.close(fd)
         try:
             record = subprocess.run(
@@ -64,7 +70,7 @@ def termux_audio_source(
                     "-l",
                     str(chunk_seconds),
                     "-e",
-                    "wav",
+                    "aac",
                     "-r",
                     str(sample_rate),
                     "-c",
@@ -91,23 +97,17 @@ def termux_audio_source(
                 timeout=10,
             )
             try:
-                with wave.open(path, "rb") as wf:
-                    frames = wf.readframes(wf.getnframes())
-                if not frames:
-                    logger.warning(
-                        "No audio captured this chunk (empty recording). Check "
-                        "that Termux:API has microphone permission: Android "
-                        "Settings > Apps > Termux:API > Permissions > Microphone."
-                    )
-                yield frames
-            except (wave.Error, EOFError, FileNotFoundError) as exc:
+                with open(path, "rb") as f:
+                    data = f.read()
+            except FileNotFoundError:
+                data = b""
+            if not data:
                 logger.warning(
-                    "No usable audio captured this chunk (%s). Check that "
-                    "Termux:API has microphone permission: Android Settings > "
-                    "Apps > Termux:API > Permissions > Microphone.",
-                    exc,
+                    "No audio captured this chunk (empty recording). Check "
+                    "that Termux:API has microphone permission: Android "
+                    "Settings > Apps > Termux:API > Permissions > Microphone."
                 )
-                yield b""
+            yield data
         finally:
             if os.path.exists(path):
                 os.remove(path)
