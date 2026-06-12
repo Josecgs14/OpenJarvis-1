@@ -36,6 +36,7 @@ class ListenerConfig:
     silence_duration: float = 1.0  # seconds of trailing silence that ends an utterance
     max_utterance_seconds: float = 15.0
     sample_rate: int = SAMPLE_RATE
+    chunk_seconds: float = CHUNK_SECONDS  # duration of each audio_source chunk
 
 
 def pcm16_to_wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -96,7 +97,7 @@ class WakeWordListener:
             ) from exc
 
         cfg = self._config
-        chunk_frames = max(1, int(cfg.sample_rate * CHUNK_SECONDS))
+        chunk_frames = max(1, int(cfg.sample_rate * cfg.chunk_seconds))
         q: "queue.Queue[bytes]" = queue.Queue()
 
         def _callback(indata, frames, time_info, status):
@@ -140,8 +141,8 @@ class WakeWordListener:
         play_audio = self._play_audio or self._default_play_audio
 
         cfg = self._config
-        silence_chunks_limit = max(1, int(cfg.silence_duration / CHUNK_SECONDS))
-        max_chunks = max(1, int(cfg.max_utterance_seconds / CHUNK_SECONDS))
+        silence_chunks_limit = max(1, int(cfg.silence_duration / cfg.chunk_seconds))
+        max_chunks = max(1, int(cfg.max_utterance_seconds / cfg.chunk_seconds))
 
         buffer = bytearray()
         speaking = False
@@ -174,7 +175,9 @@ class WakeWordListener:
                 total_chunks = 0
                 self._handle_utterance(utterance, play_audio)
 
-    def _handle_utterance(self, pcm: bytes, play_audio: Callable[[bytes, str], None]) -> None:
+    def _handle_utterance(
+        self, pcm: bytes, play_audio: Callable[[bytes, str], None]
+    ) -> None:
         wav = pcm16_to_wav(pcm, self._config.sample_rate)
         try:
             result = self._speech_backend.transcribe(wav, format="wav")

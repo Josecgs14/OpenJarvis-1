@@ -17,13 +17,25 @@ from rich.console import Console
     "--wake-phrase",
     "wake_phrases",
     multiple=True,
-    help='Wake phrase to listen for (repeatable; default: from config, e.g. "hola claude").',
+    help=(
+        'Wake phrase to listen for (repeatable; default: from config, '
+        'e.g. "hola claude").'
+    ),
 )
 @click.option(
     "--speak/--no-speak",
     "speak_replies",
     default=None,
     help="Speak responses aloud via the TTS backend (default: from config).",
+)
+@click.option(
+    "--termux/--no-termux",
+    "termux",
+    default=None,
+    help=(
+        "Use Termux:API for mic capture and spoken replies on Android "
+        "(default: auto-detect)."
+    ),
 )
 def listen(
     agent_name: str | None,
@@ -32,6 +44,7 @@ def listen(
     tools: str | None,
     wake_phrases: tuple[str, ...],
     speak_replies: bool | None,
+    termux: bool | None,
 ) -> None:
     """Listen on the microphone for a wake phrase (default "Hola Claude").
 
@@ -42,8 +55,22 @@ def listen(
     Requires a microphone and the speech extras:
 
         pip install "openjarvis[speech,speech-mic]"
+
+    On Android (Termux), mic capture and spoken replies use Termux:API
+    instead (``pkg install termux-api`` + the Termux:API companion app) —
+    detected automatically, or force with ``--termux``.
     """
     console = Console(stderr=True)
+
+    from openjarvis.voice.termux_audio import is_termux, termux_api_available
+
+    use_termux = is_termux() if termux is None else termux
+    if use_termux and not termux_api_available():
+        console.print(
+            "[red]Termux:API not found.[/red] Install the Termux:API app "
+            "and run: pkg install termux-api"
+        )
+        sys.exit(1)
 
     from openjarvis.core.config import load_config
 
@@ -55,17 +82,23 @@ def listen(
     if speech_backend is None:
         console.print(
             "[red]No speech-to-text backend available.[/red] "
-            'Install one with: pip install "openjarvis[speech]"'
+            'Install one with: pip install "openjarvis[speech]" '
+            "(or set OPENAI_API_KEY for cloud transcription)"
         )
         sys.exit(1)
 
     speak = config.voice.speak_replies if speak_replies is None else speak_replies
-    tts_backend = get_tts_backend(config) if speak else None
-    if speak and tts_backend is None:
-        console.print(
-            "[yellow]No text-to-speech backend available; replies will be "
-            "text-only.[/yellow]"
-        )
+    if use_termux:
+        from openjarvis.voice.termux_audio import TermuxTTSBackend
+
+        tts_backend = TermuxTTSBackend() if speak else None
+    else:
+        tts_backend = get_tts_backend(config) if speak else None
+        if speak and tts_backend is None:
+            console.print(
+                "[yellow]No text-to-speech backend available; replies will be "
+                "text-only.[/yellow]"
+            )
 
     phrases = list(wake_phrases) or list(config.voice.wake_phrases)
 
@@ -157,9 +190,20 @@ def listen(
         max_utterance_seconds=config.voice.max_utterance_seconds,
     )
 
+    audio_source = None
+    if use_termux:
+        from openjarvis.voice.termux_audio import termux_audio_source
+
+        listener_config.chunk_seconds = config.voice.termux_chunk_seconds
+        audio_source = termux_audio_source(
+            chunk_seconds=config.voice.termux_chunk_seconds,
+            sample_rate=listener_config.sample_rate,
+        )
+
     phrase_list = ", ".join(f'"{p}"' for p in phrases)
+    mode_note = " (Termux mic)" if use_termux else ""
     console.print(
-        f"[green bold]Listening for:[/green bold] {phrase_list}\n"
+        f"[green bold]Listening for:[/green bold] {phrase_list}{mode_note}\n"
         f"  Agent: [cyan]{agent_key or 'direct'}[/cyan]  Model: [cyan]{model}[/cyan]\n"
         "  Press Ctrl+C to stop."
     )
@@ -169,6 +213,7 @@ def listen(
         tts_backend=tts_backend,
         on_command=on_command,
         config=listener_config,
+        audio_source=audio_source,
     )
     try:
         listener.run()

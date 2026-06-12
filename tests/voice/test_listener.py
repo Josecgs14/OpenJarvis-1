@@ -67,7 +67,9 @@ class TestWakeWordListenerRun:
         )
 
         tts_backend = MagicMock()
-        tts_backend.synthesize.return_value = TTSResult(audio=b"wav-bytes", format="wav")
+        tts_backend.synthesize.return_value = TTSResult(
+            audio=b"wav-bytes", format="wav"
+        )
 
         on_command = MagicMock(return_value="Son las tres")
         play_audio = MagicMock()

@@ -40,6 +40,7 @@ def test_voice_config_defaults():
     assert cfg.silence_threshold == 0.02
     assert cfg.silence_duration == 1.0
     assert cfg.max_utterance_seconds == 15.0
+    assert cfg.termux_chunk_seconds == 4.0
 
 
 def test_jarvis_config_has_voice():

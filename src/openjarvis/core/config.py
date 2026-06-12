@@ -1419,6 +1419,9 @@ class VoiceConfig:
     silence_threshold: float = 0.02  # RMS amplitude (0-1) below which audio is silence
     silence_duration: float = 1.0  # seconds of trailing silence that ends an utterance
     max_utterance_seconds: float = 15.0
+    # Length of each recorded clip on Termux (Android), where the microphone
+    # is polled via short recordings rather than streamed continuously.
+    termux_chunk_seconds: float = 4.0
 
 
 @dataclass(slots=True)

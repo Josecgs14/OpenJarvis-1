@@ -7,7 +7,12 @@ import unicodedata
 from typing import List, Optional
 
 # Spanish and English variants of "Hola Claude" — checked in order.
-DEFAULT_WAKE_PHRASES: List[str] = ["hola claude", "hey claude", "ok claude", "oye claude"]
+DEFAULT_WAKE_PHRASES: List[str] = [
+    "hola claude",
+    "hey claude",
+    "ok claude",
+    "oye claude",
+]
 
 _WORD_RE = re.compile(r"[\w']+", re.UNICODE)
 
