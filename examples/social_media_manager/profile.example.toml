@@ -1,0 +1,18 @@
+# Brand profile for the social media manager agent.
+# Copy to profile.toml and edit — this is who the agent posts as.
+
+[profile]
+name = "Mi Marca"
+niche = "tecnología y productividad personal"
+tone = "cercano, útil, con un toque de humor"
+language = "es"           # language the posts are written in
+geo = "MX"                # Google Trends region (US, MX, ES, AR, ...)
+platforms = ["twitter"]   # twitter | mastodon (first one is the default)
+hashtags = ["#tech", "#productividad"]
+posts_per_day = 2
+posting_hours = [9, 18]   # local hours used when building the calendar
+
+# Drop photos here and the agent will caption and post them.
+# Optional: a sidecar note (foto.jpg -> foto.txt) describing the shot
+# gives the AI context for the caption. Published photos move to posted/.
+photo_queue = "~/social_photos"
