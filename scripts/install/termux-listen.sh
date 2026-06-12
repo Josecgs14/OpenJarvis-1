@@ -35,7 +35,8 @@ pkg install -y python git termux-api
 pkg install -y python-numpy python-pandas 2>/dev/null || true
 
 echo "==> Instalando OpenJarvis (puede tardar varios minutos)..."
-pip install --upgrade pip
+# Note: do NOT `pip install --upgrade pip` here — Termux's pip refuses to
+# upgrade itself (it's managed via `pkg install python-pip`).
 pip install "git+${REPO_URL}@${REPO_BRANCH}"
 
 # --- OPENAI_API_KEY -------------------------------------------------------
