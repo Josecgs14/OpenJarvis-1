@@ -35,9 +35,16 @@ pkg install -y python git termux-api
 pkg install -y python-numpy python-pandas 2>/dev/null || true
 
 echo "==> Instalando OpenJarvis (puede tardar varios minutos)..."
-# Note: do NOT `pip install --upgrade pip` here — Termux's pip refuses to
-# upgrade itself (it's managed via `pkg install python-pip`).
-pip install "git+${REPO_URL}@${REPO_BRANCH}"
+# Notes on Termux's pip:
+#  - It refuses `pip install --upgrade pip` (managed via `pkg install
+#    python-pip`), so never do that.
+#  - A normal `pip install git+...` builds in an *isolated* env, which
+#    pip tries to bootstrap/upgrade itself inside — same forbidden
+#    operation. Install the build backend (a pure-Python package with a
+#    prebuilt wheel, no isolation needed) up front, then build with
+#    --no-build-isolation so pip never spins up that isolated env.
+pip install hatchling
+pip install --no-build-isolation "git+${REPO_URL}@${REPO_BRANCH}"
 
 # --- OPENAI_API_KEY -------------------------------------------------------
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
