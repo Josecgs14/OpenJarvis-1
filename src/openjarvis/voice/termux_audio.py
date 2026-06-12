@@ -62,15 +62,20 @@ def termux_audio_source(
         fd, path = tempfile.mkstemp(suffix=".m4a", prefix="jarvis-listen-")
         os.close(fd)
         try:
+            # `-l` must be a whole number of seconds — a float string (e.g.
+            # "4.0") causes termux-microphone-record to accept the broadcast
+            # (exit 0) but produce an empty recording. `-e wav` is kept
+            # because it's the encoder value confirmed to actually record on
+            # real devices (the output is still AAC/MP4 despite the name).
             record = subprocess.run(
                 [
                     "termux-microphone-record",
                     "-f",
                     path,
                     "-l",
-                    str(chunk_seconds),
+                    str(max(1, round(chunk_seconds))),
                     "-e",
-                    "aac",
+                    "wav",
                     "-r",
                     str(sample_rate),
                     "-c",
