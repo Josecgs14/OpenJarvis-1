@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import array
+import logging
+import subprocess
 import wave
 from io import BytesIO
 from unittest.mock import patch
@@ -63,7 +65,7 @@ class TestTermuxAudioSource:
                 path = cmd[cmd.index("-f") + 1]
                 with open(path, "wb") as f:
                     f.write(wav_payload)
-            return None
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         run_patch = patch(
             "openjarvis.voice.termux_audio.subprocess.run", side_effect=_fake_run
@@ -80,13 +82,51 @@ class TestTermuxAudioSource:
         assert chunk == expected_pcm
 
     def test_missing_recording_yields_empty_bytes(self):
-        with patch("openjarvis.voice.termux_audio.subprocess.run"), \
-                patch("openjarvis.voice.termux_audio.time.sleep"):
+        ok = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        with patch(
+            "openjarvis.voice.termux_audio.subprocess.run", return_value=ok
+        ), patch("openjarvis.voice.termux_audio.time.sleep"):
             gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
             chunk = next(gen)
             gen.close()
 
         assert chunk == b""
+
+    def test_warns_when_recording_command_fails(self, caplog):
+        failed = subprocess.CompletedProcess(
+            [], 1, stdout="", stderr="Permission denial"
+        )
+        with patch(
+            "openjarvis.voice.termux_audio.subprocess.run", return_value=failed
+        ), patch("openjarvis.voice.termux_audio.time.sleep"):
+            with caplog.at_level(logging.WARNING, logger="openjarvis.voice.termux_audio"):
+                gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
+                chunk = next(gen)
+                gen.close()
+
+        assert chunk == b""
+        assert any("Permission denial" in r.message for r in caplog.records)
+
+    def test_warns_on_empty_recording(self, caplog):
+        wav_payload = _wav_bytes(0, n=0)
+
+        def _fake_run(cmd, **kwargs):
+            if "-f" in cmd:
+                path = cmd[cmd.index("-f") + 1]
+                with open(path, "wb") as f:
+                    f.write(wav_payload)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch(
+            "openjarvis.voice.termux_audio.subprocess.run", side_effect=_fake_run
+        ), patch("openjarvis.voice.termux_audio.time.sleep"):
+            with caplog.at_level(logging.WARNING, logger="openjarvis.voice.termux_audio"):
+                gen = termux_audio_source(chunk_seconds=1.0, sample_rate=16000)
+                chunk = next(gen)
+                gen.close()
+
+        assert chunk == b""
+        assert any("microphone permission" in r.message for r in caplog.records)
 
 
 class TestTermuxTTSBackend:

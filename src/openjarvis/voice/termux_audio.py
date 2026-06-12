@@ -56,7 +56,7 @@ def termux_audio_source(
         fd, path = tempfile.mkstemp(suffix=".wav", prefix="jarvis-listen-")
         os.close(fd)
         try:
-            subprocess.run(
+            record = subprocess.run(
                 [
                     "termux-microphone-record",
                     "-f",
@@ -72,8 +72,15 @@ def termux_audio_source(
                 ],
                 check=False,
                 capture_output=True,
+                text=True,
                 timeout=chunk_seconds + 10,
             )
+            if record.returncode != 0:
+                logger.warning(
+                    "termux-microphone-record failed (exit %d): %s",
+                    record.returncode,
+                    (record.stderr or record.stdout).strip(),
+                )
             # The recording runs for `chunk_seconds` in the background;
             # wait for it to finish before reading the file back.
             time.sleep(chunk_seconds + 0.5)
@@ -85,9 +92,21 @@ def termux_audio_source(
             )
             try:
                 with wave.open(path, "rb") as wf:
-                    yield wf.readframes(wf.getnframes())
-            except (wave.Error, EOFError, FileNotFoundError):
-                logger.debug("No usable audio captured for this chunk")
+                    frames = wf.readframes(wf.getnframes())
+                if not frames:
+                    logger.warning(
+                        "No audio captured this chunk (empty recording). Check "
+                        "that Termux:API has microphone permission: Android "
+                        "Settings > Apps > Termux:API > Permissions > Microphone."
+                    )
+                yield frames
+            except (wave.Error, EOFError, FileNotFoundError) as exc:
+                logger.warning(
+                    "No usable audio captured this chunk (%s). Check that "
+                    "Termux:API has microphone permission: Android Settings > "
+                    "Apps > Termux:API > Permissions > Microphone.",
+                    exc,
+                )
                 yield b""
         finally:
             if os.path.exists(path):
