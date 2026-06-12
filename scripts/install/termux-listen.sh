@@ -29,12 +29,17 @@ echo "==> Instalando Termux:API y Python..."
 pkg update -y
 pkg install -y python git termux-api
 
-# Best-effort: Termux ships prebuilt numpy/pandas wheels for its own Python.
-# Installing them via `pkg` first lets pip reuse them instead of compiling
-# from source (slow/likely to fail on-device). Safe to skip if unavailable.
-pkg install -y python-numpy python-pandas 2>/dev/null || true
+echo "==> Instalando dependencias ligeras de OpenJarvis..."
+# `jarvis listen` only needs the lightweight runtime deps below (verified by
+# importing openjarvis.cli/agents/tools/voice with exactly this set). The
+# project's full `datasets` dependency drags in pandas/pyarrow/numpy, which
+# have no usable wheels on Termux (Bionic libc) and aren't needed here.
+pip install \
+    "click>=8" "ddgs>=9.11.4" "httpx>=0.27" "openai>=1.30" \
+    "nvidia-ml-py>=12.560.30" "posthog>=3.0" "python-telegram-bot>=22.6" \
+    "rich>=13" "tomlkit>=0.12" "websockets>=15.0.1" "pyyaml"
 
-echo "==> Instalando OpenJarvis (puede tardar varios minutos)..."
+echo "==> Instalando OpenJarvis (sin dependencias pesadas)..."
 # Notes on Termux's pip:
 #  - It refuses `pip install --upgrade pip` (managed via `pkg install
 #    python-pip`), so never do that.
@@ -43,8 +48,10 @@ echo "==> Instalando OpenJarvis (puede tardar varios minutos)..."
 #    operation. Install the build backend (a pure-Python package with a
 #    prebuilt wheel, no isolation needed) up front, then build with
 #    --no-build-isolation so pip never spins up that isolated env.
+#  - --no-deps skips `datasets` and friends (see above); we installed the
+#    deps that actually matter ourselves.
 pip install hatchling
-pip install --no-build-isolation "git+${REPO_URL}@${REPO_BRANCH}"
+pip install --no-build-isolation --no-deps "git+${REPO_URL}@${REPO_BRANCH}"
 
 # --- OPENAI_API_KEY -------------------------------------------------------
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
