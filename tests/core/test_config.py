@@ -125,6 +125,17 @@ class TestTomlLoading:
         cfg = load_config(toml_file)
         assert cfg.system_prompt.prefix == ""
 
+    def test_voice_block_parsed(self, tmp_path: Path) -> None:
+        toml_file = tmp_path / "config.toml"
+        toml_file.write_text(
+            '[voice]\nwake_phrases = ["hola claude", "oye claude"]\n'
+            "speak_replies = false\nagent = \"operative\"\n"
+        )
+        cfg = load_config(toml_file)
+        assert cfg.voice.wake_phrases == ["hola claude", "oye claude"]
+        assert cfg.voice.speak_replies is False
+        assert cfg.voice.agent == "operative"
+
 
 class TestGenerateToml:
     def test_contains_engine_section(self) -> None:

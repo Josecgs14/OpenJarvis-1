@@ -1402,6 +1402,26 @@ class SpeechConfig:
 
 
 @dataclass(slots=True)
+class VoiceConfig:
+    """Always-on local wake-word listener (``jarvis listen``).
+
+    Lets you say a wake phrase (default "Hola Claude") into your computer's
+    microphone to open a hands-free voice session with the assistant —
+    similar to "Hey Google" / "Hey Siri". Requires a microphone and the
+    ``speech-mic`` extra (``pip install "openjarvis[speech-mic,speech]"``).
+    """
+
+    wake_phrases: List[str] = field(
+        default_factory=lambda: ["hola claude", "hey claude", "ok claude", "oye claude"]
+    )
+    speak_replies: bool = True
+    agent: str = ""  # Empty = agent.default_agent
+    silence_threshold: float = 0.02  # RMS amplitude (0-1) below which audio is silence
+    silence_duration: float = 1.0  # seconds of trailing silence that ends an utterance
+    max_utterance_seconds: float = 15.0
+
+
+@dataclass(slots=True)
 class OptimizeConfig:
     """Configuration optimization settings."""
 
@@ -1550,6 +1570,7 @@ class JarvisConfig:
     a2a: A2AConfig = field(default_factory=A2AConfig)
     operators: OperatorsConfig = field(default_factory=OperatorsConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent_manager: AgentManagerConfig = field(default_factory=AgentManagerConfig)
     memory_files: MemoryFilesConfig = field(default_factory=MemoryFilesConfig)
@@ -1811,6 +1832,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "a2a",
             "operators",
             "speech",
+            "voice",
             "optimize",
             "agent_manager",
             "digest",
@@ -2161,6 +2183,7 @@ __all__ = [
     "ToolsConfig",
     "TracesConfig",
     "VLLMEngineConfig",
+    "VoiceConfig",
     "WebChatChannelConfig",
     "WebhookChannelConfig",
     "WhatsAppBaileysChannelConfig",
