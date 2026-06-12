@@ -40,8 +40,14 @@ echo "==> Instalando dependencias ligeras de OpenJarvis..."
 #    from source via maturin/rustc, which doesn't support that target either.
 #    Only the web_search tool needs it (lazily imported), so the rest of
 #    `jarvis listen` works fine without it.
+#  - openai — pulls in `jiter` (and, transitively via `pydantic`,
+#    `pydantic-core`), both Rust extensions with the same no-wheel /
+#    no-rustc-target problem as primp above. The `openai` package is only
+#    imported lazily (try/except ImportError) by CloudEngine and the Whisper
+#    backend, which fall back to plain `httpx` calls against the OpenAI REST
+#    API when it's missing — so `jarvis listen` works fine without it too.
 pip install \
-    "click>=8" "httpx>=0.27" "openai>=1.30" \
+    "click>=8" "httpx>=0.27" \
     "nvidia-ml-py>=12.560.30" "posthog>=3.0" "python-telegram-bot>=22.6" \
     "rich>=13" "tomlkit>=0.12" "websockets>=15.0.1" "pyyaml"
 

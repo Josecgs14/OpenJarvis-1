@@ -55,3 +55,35 @@ def test_openai_whisper_health_no_key():
         backend._client = None
         backend._api_key = ""
         assert backend.health() is False
+
+
+def test_openai_whisper_transcribe_http_fallback():
+    """When the `openai` package isn't installed (e.g. Termux, where its
+    Rust-based deps jiter/pydantic-core have no prebuilt wheels), transcribe
+    via raw HTTP instead."""
+    with patch("openjarvis.speech.openai_whisper.OpenAI", None):
+        backend = OpenAIWhisperBackend(api_key="test-key")
+        assert backend._client is None
+        assert backend.health() is True
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "text": "Hello via HTTP",
+            "language": "en",
+            "duration": 1.5,
+        }
+
+        with patch(
+            "openjarvis.speech.openai_whisper.httpx.post",
+            return_value=mock_response,
+        ) as mock_post:
+            result = backend.transcribe(b"fake audio", format="wav")
+
+        assert result.text == "Hello via HTTP"
+        assert result.language == "en"
+        assert result.duration_seconds == 1.5
+
+        call = mock_post.call_args
+        assert call.kwargs["headers"]["Authorization"] == "Bearer test-key"
+        assert call.kwargs["data"]["model"] == "whisper-1"
