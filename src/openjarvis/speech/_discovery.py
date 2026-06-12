@@ -74,10 +74,12 @@ def get_speech_backend(config: "JarvisConfig") -> Optional["SpeechBackend"]:
     if backend_key != "auto":
         return _create_backend(backend_key, config)
 
-    # Auto-discovery: try each in priority order
+    # Auto-discovery: try each in priority order, skipping backends whose
+    # dependencies aren't actually installed (e.g. faster-whisper registers
+    # itself even without the optional package, but health() reports False).
     for key in DISCOVERY_ORDER:
         backend = _create_backend(key, config)
-        if backend is not None:
+        if backend is not None and backend.health():
             return backend
 
     return None

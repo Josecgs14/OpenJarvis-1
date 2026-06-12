@@ -48,6 +48,38 @@ def test_auto_discovery_priority():
     assert "deepgram" in DISCOVERY_ORDER
 
 
+def test_auto_discovery_skips_unhealthy_backend():
+    """A registered-but-unavailable backend (e.g. faster-whisper without the
+    package installed) is skipped in favor of the next healthy one."""
+    from openjarvis.speech._discovery import get_speech_backend
+
+    config = JarvisConfig()
+    config.speech.backend = "auto"
+
+    unhealthy = type(
+        "UnhealthyBackend",
+        (),
+        {"backend_id": "faster-whisper", "health": lambda self: False},
+    )()
+    healthy = type(
+        "HealthyBackend",
+        (),
+        {"backend_id": "openai", "health": lambda self: True},
+    )()
+
+    def _fake_create(key, _config):
+        return unhealthy if key == "faster-whisper" else (
+            healthy if key == "openai" else None
+        )
+
+    with patch(
+        "openjarvis.speech._discovery._create_backend", side_effect=_fake_create
+    ):
+        result = get_speech_backend(config)
+
+    assert result is healthy
+
+
 def test_get_tts_backend_explicit():
     """Explicit TTS backend selection works."""
     from openjarvis.speech._discovery import get_tts_backend
