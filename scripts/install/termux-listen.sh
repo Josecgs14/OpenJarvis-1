@@ -31,11 +31,17 @@ pkg install -y python git termux-api
 
 echo "==> Instalando dependencias ligeras de OpenJarvis..."
 # `jarvis listen` only needs the lightweight runtime deps below (verified by
-# importing openjarvis.cli/agents/tools/voice with exactly this set). The
-# project's full `datasets` dependency drags in pandas/pyarrow/numpy, which
-# have no usable wheels on Termux (Bionic libc) and aren't needed here.
+# importing openjarvis.cli/agents/tools/voice with exactly this set). Skipped
+# on purpose:
+#  - datasets (and its pandas/pyarrow/numpy chain) — no usable wheels on
+#    Termux's Bionic libc, and not needed here.
+#  - ddgs — pulls in `primp`, a Rust extension with no wheel for Termux's
+#    cpython-313-aarch64-linux-android target; pip falls back to building
+#    from source via maturin/rustc, which doesn't support that target either.
+#    Only the web_search tool needs it (lazily imported), so the rest of
+#    `jarvis listen` works fine without it.
 pip install \
-    "click>=8" "ddgs>=9.11.4" "httpx>=0.27" "openai>=1.30" \
+    "click>=8" "httpx>=0.27" "openai>=1.30" \
     "nvidia-ml-py>=12.560.30" "posthog>=3.0" "python-telegram-bot>=22.6" \
     "rich>=13" "tomlkit>=0.12" "websockets>=15.0.1" "pyyaml"
 
