@@ -46,6 +46,27 @@ def termux_api_available() -> bool:
     return shutil.which("termux-microphone-record") is not None
 
 
+def _recording_dir() -> str:
+    """Return a directory both Termux and the Termux:API app can write to.
+
+    ``termux-microphone-record`` only sends a request to the separate
+    Termux:API app (``com.termux.api``, a different process/UID), which
+    performs the actual recording. That app can't write to Termux's
+    private tmpdir (``$PREFIX/tmp``, where :func:`tempfile.mkstemp` puts
+    files by default) — only to shared storage (``/sdcard``). Falls back to
+    the regular tmpdir outside Termux, or if ``/sdcard`` isn't usable
+    (e.g. ``termux-setup-storage`` hasn't been run).
+    """
+    if not is_termux():
+        return tempfile.gettempdir()
+    shared = "/sdcard/.jarvis-listen-tmp"
+    try:
+        os.makedirs(shared, exist_ok=True)
+        return shared
+    except OSError:
+        return tempfile.gettempdir()
+
+
 def termux_audio_source(
     chunk_seconds: float = 4.0, sample_rate: int = 16000
 ) -> Iterator[bytes]:
@@ -59,7 +80,9 @@ def termux_audio_source(
     caller stops iterating.
     """
     while True:
-        fd, path = tempfile.mkstemp(suffix=".m4a", prefix="jarvis-listen-")
+        fd, path = tempfile.mkstemp(
+            suffix=".m4a", prefix="jarvis-listen-", dir=_recording_dir()
+        )
         os.close(fd)
         try:
             # `-l` must be a whole number of seconds — a float string (e.g.

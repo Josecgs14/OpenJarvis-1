@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import tempfile
 from unittest.mock import patch
 
 from openjarvis.voice.termux_audio import (
     TermuxTTSBackend,
+    _recording_dir,
     is_termux,
     termux_api_available,
     termux_audio_source,
@@ -40,6 +42,30 @@ class TestTermuxApiAvailable:
     def test_false_when_binary_missing(self):
         with patch("shutil.which", return_value=None):
             assert termux_api_available() is False
+
+
+class TestRecordingDir:
+    def test_non_termux_uses_system_tmpdir(self, monkeypatch):
+        monkeypatch.delenv("TERMUX_VERSION", raising=False)
+        monkeypatch.setenv("PREFIX", "/usr")
+
+        assert _recording_dir() == tempfile.gettempdir()
+
+    def test_termux_uses_shared_storage(self, monkeypatch):
+        monkeypatch.setenv("TERMUX_VERSION", "0.118.0")
+        with patch("openjarvis.voice.termux_audio.os.makedirs") as mock_makedirs:
+            assert _recording_dir() == "/sdcard/.jarvis-listen-tmp"
+        mock_makedirs.assert_called_once_with(
+            "/sdcard/.jarvis-listen-tmp", exist_ok=True
+        )
+
+    def test_termux_falls_back_if_shared_storage_unusable(self, monkeypatch):
+        monkeypatch.setenv("TERMUX_VERSION", "0.118.0")
+        with patch(
+            "openjarvis.voice.termux_audio.os.makedirs",
+            side_effect=OSError("no /sdcard"),
+        ):
+            assert _recording_dir() == tempfile.gettempdir()
 
 
 class TestTermuxAudioSource:
