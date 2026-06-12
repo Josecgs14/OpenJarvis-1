@@ -233,3 +233,286 @@ class TestChannelAgentWiring:
 
         assert len(calls_a) == 1
         assert len(calls_b) == 1
+
+
+class TestResolveSpeechBackend:
+    """Tests for lazy speech-to-text backend resolution."""
+
+    def test_injected_backend_used_without_discovery(self):
+        mock_backend = MagicMock()
+        ch = TelegramChannel(bot_token="tok", speech_backend=mock_backend)
+
+        with patch("openjarvis.speech._discovery.get_speech_backend") as mock_get:
+            result = ch._resolve_speech_backend()
+
+        assert result is mock_backend
+        mock_get.assert_not_called()
+
+    def test_lazy_discovery_is_cached(self):
+        ch = TelegramChannel(bot_token="tok")
+        mock_backend = MagicMock()
+
+        with patch(
+            "openjarvis.speech._discovery.get_speech_backend",
+            return_value=mock_backend,
+        ) as mock_get:
+            first = ch._resolve_speech_backend()
+            second = ch._resolve_speech_backend()
+
+        assert first is mock_backend
+        assert second is mock_backend
+        mock_get.assert_called_once()
+
+    def test_discovery_failure_returns_none(self):
+        ch = TelegramChannel(bot_token="tok")
+
+        with patch(
+            "openjarvis.speech._discovery.get_speech_backend",
+            side_effect=Exception("boom"),
+        ):
+            result = ch._resolve_speech_backend()
+
+        assert result is None
+
+
+class TestResolveTTSBackend:
+    """Tests for lazy text-to-speech backend resolution."""
+
+    def test_injected_backend_used_without_discovery(self):
+        mock_backend = MagicMock()
+        ch = TelegramChannel(bot_token="tok", tts_backend=mock_backend)
+
+        with patch("openjarvis.speech._discovery.get_tts_backend") as mock_get:
+            result = ch._resolve_tts_backend()
+
+        assert result is mock_backend
+        mock_get.assert_not_called()
+
+    def test_lazy_discovery_is_cached(self):
+        ch = TelegramChannel(bot_token="tok")
+        mock_backend = MagicMock()
+
+        with patch(
+            "openjarvis.speech._discovery.get_tts_backend",
+            return_value=mock_backend,
+        ) as mock_get:
+            first = ch._resolve_tts_backend()
+            second = ch._resolve_tts_backend()
+
+        assert first is mock_backend
+        assert second is mock_backend
+        mock_get.assert_called_once()
+
+    def test_discovery_failure_returns_none(self):
+        ch = TelegramChannel(bot_token="tok")
+
+        with patch(
+            "openjarvis.speech._discovery.get_tts_backend",
+            side_effect=Exception("boom"),
+        ):
+            result = ch._resolve_tts_backend()
+
+        assert result is None
+
+
+class TestDownloadTelegramFile:
+    """Tests for downloading voice/audio files from the Bot API."""
+
+    def test_download_success(self):
+        ch = TelegramChannel(bot_token="123:ABC")
+
+        meta_resp = MagicMock()
+        meta_resp.json.return_value = {"result": {"file_path": "voice/file_0.oga"}}
+
+        file_resp = MagicMock()
+        file_resp.content = b"audio-bytes"
+
+        with patch("httpx.get", side_effect=[meta_resp, file_resp]) as mock_get:
+            result = ch._download_telegram_file("file123")
+
+        assert result == b"audio-bytes"
+        assert mock_get.call_count == 2
+
+        meta_call, file_call = mock_get.call_args_list
+        assert "getFile" in meta_call[0][0]
+        assert meta_call[1]["params"] == {"file_id": "file123"}
+        assert "voice/file_0.oga" in file_call[0][0]
+        assert "bot123:ABC" in file_call[0][0]
+
+    def test_download_failure_returns_none(self):
+        ch = TelegramChannel(bot_token="123:ABC")
+
+        with patch("httpx.get", side_effect=ConnectionError("refused")):
+            result = ch._download_telegram_file("file123")
+
+        assert result is None
+
+
+class TestTranscribeAudio:
+    """Tests for transcribing downloaded voice notes."""
+
+    def test_transcribe_success_strips_whitespace(self):
+        from openjarvis.speech._stubs import TranscriptionResult
+
+        mock_backend = MagicMock()
+        mock_backend.transcribe.return_value = TranscriptionResult(text="  hola  ")
+        ch = TelegramChannel(bot_token="tok", speech_backend=mock_backend)
+
+        result = ch._transcribe_audio(b"audio", fmt="ogg")
+
+        assert result == "hola"
+        mock_backend.transcribe.assert_called_once_with(b"audio", format="ogg")
+
+    def test_transcribe_no_backend_returns_none(self):
+        ch = TelegramChannel(bot_token="tok")
+
+        with patch.object(ch, "_resolve_speech_backend", return_value=None):
+            result = ch._transcribe_audio(b"audio")
+
+        assert result is None
+
+    def test_transcribe_empty_text_returns_none(self):
+        from openjarvis.speech._stubs import TranscriptionResult
+
+        mock_backend = MagicMock()
+        mock_backend.transcribe.return_value = TranscriptionResult(text="   ")
+        ch = TelegramChannel(bot_token="tok", speech_backend=mock_backend)
+
+        result = ch._transcribe_audio(b"audio")
+
+        assert result is None
+
+    def test_transcribe_exception_returns_none(self):
+        mock_backend = MagicMock()
+        mock_backend.transcribe.side_effect = Exception("boom")
+        ch = TelegramChannel(bot_token="tok", speech_backend=mock_backend)
+
+        result = ch._transcribe_audio(b"audio")
+
+        assert result is None
+
+
+class TestSendVoiceReply:
+    """Tests for synthesizing and sending voice replies."""
+
+    def test_send_voice_reply_success(self):
+        from openjarvis.speech.tts import TTSResult
+
+        mock_backend = MagicMock()
+        mock_backend.synthesize.return_value = TTSResult(
+            audio=b"mp3-bytes", format="mp3"
+        )
+        ch = TelegramChannel(bot_token="123:ABC", tts_backend=mock_backend)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.post", return_value=mock_response) as mock_post:
+            result = ch._send_voice_reply("12345", "Hello")
+
+        assert result is True
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        assert "sendAudio" in call_args[0][0]
+        assert call_args[1]["data"] == {"chat_id": "12345"}
+        filename, audio_bytes, mime = call_args[1]["files"]["audio"]
+        assert filename == "reply.mp3"
+        assert audio_bytes == b"mp3-bytes"
+        assert mime == "audio/mp3"
+
+    def test_send_voice_reply_no_backend_returns_false(self):
+        ch = TelegramChannel(bot_token="123:ABC")
+
+        with patch.object(ch, "_resolve_tts_backend", return_value=None):
+            result = ch._send_voice_reply("12345", "Hello")
+
+        assert result is False
+
+    def test_send_voice_reply_http_failure_returns_false(self):
+        from openjarvis.speech.tts import TTSResult
+
+        mock_backend = MagicMock()
+        mock_backend.synthesize.return_value = TTSResult(
+            audio=b"mp3-bytes", format="mp3"
+        )
+        ch = TelegramChannel(bot_token="123:ABC", tts_backend=mock_backend)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "Bad Request"
+
+        with patch("httpx.post", return_value=mock_response):
+            result = ch._send_voice_reply("12345", "Hello")
+
+        assert result is False
+
+    def test_send_voice_reply_exception_returns_false(self):
+        mock_backend = MagicMock()
+        mock_backend.synthesize.side_effect = Exception("boom")
+        ch = TelegramChannel(bot_token="123:ABC", tts_backend=mock_backend)
+
+        result = ch._send_voice_reply("12345", "Hello")
+
+        assert result is False
+
+
+class TestSendVoiceReplyIntegration:
+    """Tests for the voice-reply branch inside send()."""
+
+    def test_send_triggers_voice_reply_after_voice_input(self):
+        ch = TelegramChannel(bot_token="123:ABC", voice_replies=True)
+        ch._last_input_type["12345678"] = "voice"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.post", return_value=mock_response), patch.object(
+            ch, "_send_voice_reply", return_value=True
+        ) as mock_voice:
+            ch.send("12345678", "Hello!", conversation_id="12345678")
+
+        mock_voice.assert_called_once_with("12345678", "Hello!")
+
+    def test_send_skips_voice_reply_after_text_input(self):
+        ch = TelegramChannel(bot_token="123:ABC", voice_replies=True)
+        ch._last_input_type["12345678"] = "text"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.post", return_value=mock_response), patch.object(
+            ch, "_send_voice_reply"
+        ) as mock_voice:
+            ch.send("12345678", "Hello!", conversation_id="12345678")
+
+        mock_voice.assert_not_called()
+
+    def test_send_skips_voice_reply_when_disabled(self):
+        ch = TelegramChannel(bot_token="123:ABC", voice_replies=False)
+        ch._last_input_type["12345678"] = "voice"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        with patch("httpx.post", return_value=mock_response), patch.object(
+            ch, "_send_voice_reply"
+        ) as mock_voice:
+            ch.send("12345678", "Hello!", conversation_id="12345678")
+
+        mock_voice.assert_not_called()
+
+    def test_send_skips_voice_reply_for_long_content(self):
+        ch = TelegramChannel(bot_token="123:ABC", voice_replies=True)
+        ch._last_input_type["12345678"] = "voice"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        long_content = "x" * 2001
+
+        with patch("httpx.post", return_value=mock_response), patch.object(
+            ch, "_send_voice_reply"
+        ) as mock_voice:
+            ch.send("12345678", long_content, conversation_id="12345678")
+
+        mock_voice.assert_not_called()

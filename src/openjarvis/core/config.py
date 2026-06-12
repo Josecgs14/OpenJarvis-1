@@ -1054,6 +1054,7 @@ class TelegramChannelConfig:
     bot_token: str = ""
     allowed_chat_ids: str = ""
     parse_mode: str = "Markdown"
+    voice_replies: bool = False
 
 
 @dataclass(slots=True)
@@ -1389,13 +1390,15 @@ class OperatorsConfig:
 
 @dataclass(slots=True)
 class SpeechConfig:
-    """Speech-to-text settings."""
+    """Speech-to-text and text-to-speech settings."""
 
     backend: str = "auto"  # "auto", "faster-whisper", "openai", "deepgram"
     model: str = "base"  # Whisper model size: tiny, base, small, medium, large-v3
     language: str = ""  # Empty = auto-detect
     device: str = "auto"  # "auto", "cpu", "cuda"
     compute_type: str = "float16"  # "float16", "int8", "float32"
+    tts_backend: str = "auto"  # "auto", "kokoro", "openai_tts", "cartesia"
+    tts_voice_id: str = ""  # Empty = backend default voice
 
 
 @dataclass(slots=True)

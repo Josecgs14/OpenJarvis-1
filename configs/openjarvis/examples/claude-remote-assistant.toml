@@ -24,7 +24,16 @@
 #      export ALPACA_SECRET_KEY="..."
 #      export ALPACA_PAPER=true        # set to "false" only when you're ready
 #                                       # for real money — see warnings below.
-# 5. Start everything:
+# 5. (Optional) Voice messages — talk to Claude with your voice on Telegram:
+#      pip install "openjarvis[speech]"   # local speech-to-text (faster-whisper)
+#    Send a voice note on Telegram and it's transcribed automatically, no
+#    config needed. For spoken replies too, set
+#    [channel.telegram].voice_replies = true below and pick a TTS backend:
+#      - local (no key needed):   pip install "openjarvis[speech]"  (kokoro)
+#      - cloud (OpenAI TTS):       export OPENAI_API_KEY="..."
+#      - cloud (Cartesia):         export CARTESIA_API_KEY="..."
+#    [speech].tts_backend = "auto" tries local-first, then cloud.
+# 6. Start everything:
 #      jarvis scheduler start &
 #      jarvis serve
 #
@@ -82,6 +91,11 @@ default_agent = "operative"
 [channel.telegram]
 # bot_token = ""          # Or set TELEGRAM_BOT_TOKEN env var
 allowed_chat_ids = ""     # Required: your Telegram chat ID(s), comma-separated
+voice_replies = false     # Set true to also get spoken replies to voice notes
+
+[speech]
+# backend = "auto"        # Speech-to-text: "auto", "faster-whisper", "openai", "deepgram"
+# tts_backend = "auto"    # Text-to-speech: "auto", "kokoro", "openai_tts", "cartesia"
 
 [scheduler]
 enabled = true

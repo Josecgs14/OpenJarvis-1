@@ -12,6 +12,12 @@ def test_speech_config_defaults():
     assert cfg.compute_type == "float16"
 
 
+def test_speech_config_tts_defaults():
+    cfg = SpeechConfig()
+    assert cfg.tts_backend == "auto"
+    assert cfg.tts_voice_id == ""
+
+
 def test_jarvis_config_has_speech():
     cfg = JarvisConfig()
     assert hasattr(cfg, "speech")

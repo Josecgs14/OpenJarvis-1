@@ -36,6 +36,7 @@ class TestChannelConfig:
         assert cfg.bot_token == ""
         assert cfg.allowed_chat_ids == ""
         assert cfg.parse_mode == "Markdown"
+        assert cfg.voice_replies is False
 
     def test_discord_defaults(self):
         cfg = DiscordChannelConfig()
@@ -102,6 +103,18 @@ parse_mode = "HTML"
             cfg = load_config(path)
             assert cfg.channel.telegram.bot_token == "123:ABC"
             assert cfg.channel.telegram.parse_mode == "HTML"
+        finally:
+            path.unlink()
+
+    def test_load_channel_telegram_voice_replies(self):
+        path = self._write_toml("""
+[channel.telegram]
+bot_token = "123:ABC"
+voice_replies = true
+""")
+        try:
+            cfg = load_config(path)
+            assert cfg.channel.telegram.voice_replies is True
         finally:
             path.unlink()
 
