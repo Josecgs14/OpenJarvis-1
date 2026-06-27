@@ -1,0 +1,32 @@
+# 24/7 social media manager.
+#
+# Quick start on any server with Docker:
+#   1. cp ../.env.example ../.env   # then fill in BUFFER_ACCESS_TOKEN etc.
+#   2. add your brand profile at ../profile.toml
+#   3. from the OpenJarvis repo root:
+#        docker compose -f examples/social_media_manager/deploy/docker-compose.yml up -d --build
+#
+# The agent runs forever: publishes due posts every 30 min, plans weekly,
+# reports weekly. State persists in the named volume "smm_data".
+
+services:
+  social-agent:
+    build:
+      context: ../../..            # OpenJarvis repo root
+      dockerfile: examples/social_media_manager/deploy/Dockerfile
+    restart: always
+    env_file:
+      - ../.env                    # your tokens (gitignored)
+    environment:
+      # Use a cloud engine so no GPU is needed. Set the matching API key
+      # in ../.env (e.g. OPENAI_API_KEY=...). Swap "cloud" for your engine.
+      AGENT_ARGS: "--engine cloud"
+      RUN_EVERY_MIN: "30"
+      PLAN_DAYS: "7"
+      TZ: "America/Detroit"        # your timezone (matches your Buffer)
+    volumes:
+      - smm_data:/data             # SQLite DB survives restarts
+      - ../profile.toml:/app/agent/profile.toml:ro
+
+volumes:
+  smm_data:

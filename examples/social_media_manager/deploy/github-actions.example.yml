@@ -1,0 +1,59 @@
+# Free 24/7 automation with GitHub Actions — no server to manage.
+#
+# Copy this file into YOUR OWN repository at:
+#   .github/workflows/social-media-agent.yml
+#
+# Then add repository Secrets (Settings -> Secrets and variables ->
+# Actions):
+#   BUFFER_ACCESS_TOKEN, BUFFER_FACEBOOK_CHANNEL_ID,
+#   BUFFER_INSTAGRAM_CHANNEL_ID, and your cloud LLM key (e.g. OPENAI_API_KEY).
+#
+# GitHub runs this on its own cloud machines on the schedule below — your
+# computer can be off. It fills your Buffer queue; Buffer publishes.
+#
+# NOTE: GitHub's cron is UTC and can be delayed a few minutes under load.
+
+name: Social Media Agent
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"     # Mondays 13:00 UTC -> plan the week
+    - cron: "*/30 * * * *"   # every 30 min -> publish anything due
+  workflow_dispatch: {}       # manual "Run workflow" button
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install openjarvis click httpx
+
+      # Persist the SQLite state between runs via the Actions cache.
+      - name: Restore state
+        uses: actions/cache@v4
+        with:
+          path: smm-state
+          key: smm-state-${{ github.run_id }}
+          restore-keys: smm-state-
+
+      - name: Run agent
+        env:
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          BUFFER_FACEBOOK_CHANNEL_ID: ${{ secrets.BUFFER_FACEBOOK_CHANNEL_ID }}
+          BUFFER_INSTAGRAM_CHANNEL_ID: ${{ secrets.BUFFER_INSTAGRAM_CHANNEL_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SMM_DB: smm-state/db.sqlite
+        run: |
+          mkdir -p smm-state
+          AGENT=examples/social_media_manager/social_media_manager.py
+          # On the weekly trigger, plan; on every trigger, publish due posts.
+          if [ "${{ github.event.schedule }}" = "0 13 * * 1" ]; then
+            python $AGENT --engine cloud plan --days 7
+          fi
+          python $AGENT --engine cloud run
