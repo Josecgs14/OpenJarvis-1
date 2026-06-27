@@ -4,7 +4,9 @@ An AI agent that runs your social media accounts end to end, on your own
 machine:
 
 - **Posts messages and photos** to X/Twitter, Instagram, Facebook Pages, and
-  Mastodon (photo captions are written by the AI).
+  Mastodon — directly, or through **Buffer** (one token covers Instagram,
+  Facebook, TikTok, LinkedIn, and more, with no per-network API setup). Photo
+  captions are written by the AI.
 - **Rides trends** — pulls Google Trends and Hacker News, scores each topic
   for relevance to *your* niche with the local model.
 - **Plans a content calendar** — mixes trend-riding and evergreen posts and
@@ -94,6 +96,31 @@ fetch it. So for Instagram pass `--photo https://...` (or schedule posts whose
 `image_path` is a URL); local files are rejected with a clear error. Facebook
 accepts both local files and URLs, and personal profiles can't be automated —
 only Pages you manage.
+
+### Publishing through Buffer (no Meta API setup)
+
+If wrangling Meta app permissions is a pain, route through **Buffer** instead —
+it already holds the OAuth for your connected channels, so the agent needs only
+a Buffer token. Use platform names of the form `buffer:<service>` in your
+profile:
+
+```toml
+platforms = ["buffer:facebook", "buffer:instagram"]
+```
+
+Then in `.env`:
+
+```bash
+BUFFER_ACCESS_TOKEN=...                 # publish.buffer.com/settings/api
+BUFFER_FACEBOOK_CHANNEL_ID=...          # from Buffer's channel list
+BUFFER_INSTAGRAM_CHANNEL_ID=...
+BUFFER_TIKTOK_CHANNEL_ID=...
+BUFFER_SHARE_NOW=0                       # 0 = add to Buffer queue, 1 = post now
+```
+
+By default posts land in your Buffer **queue** (the next scheduled slot you set
+up in Buffer); set `BUFFER_SHARE_NOW=1` to publish immediately. Images must be
+public URLs (Buffer fetches them), and Instagram/TikTok require an image.
 
 ### Photos
 

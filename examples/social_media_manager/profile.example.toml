@@ -7,8 +7,11 @@ niche = "tecnología y productividad personal"
 tone = "cercano, útil, con un toque de humor"
 language = "es"           # language the posts are written in
 geo = "MX"                # Google Trends region (US, MX, ES, AR, ...)
-# twitter | instagram | facebook | mastodon (first one is the default).
-# Instagram only accepts photo posts with publicly hosted image URLs.
+# Direct: twitter | instagram | facebook | mastodon
+# Via Buffer (easiest — one token, many networks): buffer:facebook |
+#   buffer:instagram | buffer:tiktok | buffer:linkedin
+# First one is the default. Instagram only accepts photo posts with
+# publicly hosted image URLs.
 platforms = ["twitter"]
 hashtags = ["#tech", "#productividad"]
 posts_per_day = 2

@@ -276,3 +276,57 @@ def test_is_url():
     assert platforms_mod.is_url("http://example.com/a.jpg")
     assert not platforms_mod.is_url("/home/user/a.jpg")
     assert not platforms_mod.is_url("a.jpg")
+
+
+# ---------------------------------------------------------------------------
+# Buffer
+# ---------------------------------------------------------------------------
+
+
+def test_buffer_route_dry_run_char_limit():
+    plat = get_platform("buffer:facebook", dry_run=True)
+    assert isinstance(plat, DryRunPlatform)
+    assert plat.char_limit == 2200
+    # underscore form is also accepted
+    assert get_platform("buffer_twitter", dry_run=True).char_limit == 280
+
+
+def test_buffer_requires_token_and_channel(monkeypatch):
+    import platforms as platforms_mod
+    import pytest
+
+    monkeypatch.delenv("BUFFER_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("BUFFER_FACEBOOK_CHANNEL_ID", raising=False)
+
+    # No token at all
+    with pytest.raises(platforms_mod.PlatformError, match="BUFFER_ACCESS_TOKEN"):
+        platforms_mod.get_platform("buffer:facebook")
+
+    # Token but no channel id for that service
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "tok")
+    with pytest.raises(platforms_mod.PlatformError, match="CHANNEL_ID"):
+        platforms_mod.get_platform("buffer:facebook")
+
+
+def test_buffer_builds_from_env(monkeypatch):
+    import platforms as platforms_mod
+
+    monkeypatch.setenv("BUFFER_ACCESS_TOKEN", "tok")
+    monkeypatch.setenv("BUFFER_INSTAGRAM_CHANNEL_ID", "chan123")
+    plat = platforms_mod.get_platform("buffer:instagram")
+    assert isinstance(plat, platforms_mod.BufferPlatform)
+    assert plat.service == "instagram"
+    assert plat.char_limit == 2200
+    assert plat._channel_id == "chan123"
+
+
+def test_buffer_rejects_local_photo_and_text_only_instagram():
+    import platforms as platforms_mod
+
+    plat = platforms_mod.BufferPlatform("instagram", "chan", "tok")
+    # Local file rejected before any HTTP call
+    result = plat.publish("hola", image_path="/tmp/foto.jpg")
+    assert not result.ok and "public image URL" in result.error
+    # Instagram needs media
+    result = plat.publish("hola")
+    assert not result.ok and "requires an image" in result.error

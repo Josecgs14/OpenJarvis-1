@@ -429,6 +429,116 @@ class InstagramPlatform:
             return None
 
 
+class BufferPlatform:
+    """Publish through Buffer — one integration covers many networks.
+
+    Buffer already holds the OAuth for your connected channels (Instagram,
+    Facebook, TikTok, LinkedIn, ...), so the agent never touches the Meta
+    Graph API or per-network tokens. You only need a Buffer access token
+    and the channel id you want to post to.
+
+    Addressed as ``buffer:<service>`` (e.g. ``buffer:facebook``). The
+    channel id is read from ``BUFFER_<SERVICE>_CHANNEL_ID`` and the token
+    from ``BUFFER_ACCESS_TOKEN`` (see ``get_platform``).
+
+    Uses Buffer's REST API. By default posts are added to the channel's
+    queue (the next free slot in your Buffer schedule); set
+    ``BUFFER_SHARE_NOW=1`` to publish immediately instead.
+
+    Notes / Buffer's own rules:
+      * Images must be public URLs (Buffer fetches them) — same as the
+        direct Instagram path. Local files are rejected.
+      * Instagram and TikTok require an image/video; text-only fails.
+    """
+
+    _API = "https://api.bufferapp.com/1"
+
+    # Buffer composes for each network; these are generous display caps.
+    _LIMITS = {
+        "twitter": 280,
+        "facebook": 2200,
+        "instagram": 2200,
+        "tiktok": 2200,
+        "linkedin": 3000,
+        "mastodon": 500,
+    }
+
+    def __init__(self, service: str, channel_id: str, token: str) -> None:
+        self.name = f"buffer:{service}"
+        self.service = service
+        self.char_limit = self._LIMITS.get(service, 2200)
+        self._channel_id = channel_id
+        self._token = token
+        self._share_now = os.environ.get("BUFFER_SHARE_NOW", "").strip() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+    def publish(self, text: str, image_path: Optional[str] = None) -> PostResult:
+        if image_path and not is_url(image_path):
+            return PostResult(
+                ok=False,
+                error="Buffer needs a public image URL, not a local file"
+                f" ({image_path!r}) — host it and pass the https:// URL",
+            )
+        if self.service in ("instagram", "tiktok") and not image_path:
+            return PostResult(
+                ok=False,
+                error=f"{self.service} requires an image or video — give"
+                " this post a photo URL",
+            )
+        import httpx
+
+        data = {
+            "access_token": self._token,
+            "profile_ids[]": self._channel_id,
+            "text": text,
+            "now": "true" if self._share_now else "false",
+        }
+        if image_path:
+            data["media[photo]"] = image_path
+            data["media[picture]"] = image_path
+        try:
+            resp = httpx.post(
+                f"{self._API}/updates/create.json", data=data, timeout=30.0
+            )
+            if resp.status_code != 200:
+                return PostResult(
+                    ok=False, error=f"HTTP {resp.status_code}: {resp.text[:200]}"
+                )
+            body = resp.json()
+            if not body.get("success"):
+                return PostResult(ok=False, error=str(body)[:200])
+            updates = body.get("updates") or []
+            remote_id = updates[0].get("id", "") if updates else ""
+            state = "published" if self._share_now else "queued"
+            return PostResult(ok=True, remote_id=remote_id, url=f"buffer:{state}")
+        except Exception as exc:
+            return PostResult(ok=False, error=str(exc))
+
+    def fetch_metrics(self, remote_id: str) -> Optional[Dict[str, int]]:
+        import httpx
+
+        try:
+            resp = httpx.get(
+                f"{self._API}/updates/{remote_id}.json",
+                params={"access_token": self._token},
+                timeout=15.0,
+            )
+            if resp.status_code != 200:
+                return None
+            stats = resp.json().get("statistics") or {}
+            return {
+                "likes": int(stats.get("favorites", 0) or stats.get("likes", 0)),
+                "shares": int(stats.get("shares", 0) or stats.get("retweets", 0)),
+                "replies": int(stats.get("comments", 0) or stats.get("mentions", 0)),
+                "impressions": int(stats.get("reach", 0) or stats.get("clicks", 0)),
+            }
+        except Exception:
+            return None
+
+
 class DryRunPlatform:
     """Prints the post instead of publishing. No credentials needed.
 
@@ -471,22 +581,55 @@ _PLATFORMS = {
 }
 
 
+def _buffer_service(key: str) -> Optional[str]:
+    """Return the service name for a ``buffer:<service>`` key, else None."""
+    for sep in (":", "_"):
+        prefix = f"buffer{sep}"
+        if key.startswith(prefix):
+            return key[len(prefix) :]
+    return None
+
+
 def get_platform(name: str, *, dry_run: bool = False):
     """Build the adapter for *name*; wrap as dry-run when asked.
 
-    In dry-run mode no credentials are required — the returned adapter
-    only prints.
+    Accepts direct networks (``facebook``, ``instagram``, ...) and Buffer
+    routes (``buffer:facebook``, ``buffer:instagram``, ...). In dry-run
+    mode no credentials are required — the returned adapter only prints.
     """
     key = name.lower().strip()
+    service = _buffer_service(key)
+
     if dry_run:
         plat = DryRunPlatform(name=key)
-        cls = _PLATFORMS.get(key)
-        if cls is not None:
-            plat.char_limit = cls.char_limit
+        if service is not None:
+            plat.char_limit = BufferPlatform._LIMITS.get(service, 2200)
+        else:
+            cls = _PLATFORMS.get(key)
+            if cls is not None:
+                plat.char_limit = cls.char_limit
         return plat
+
+    if service is not None:
+        token = os.environ.get("BUFFER_ACCESS_TOKEN", "")
+        channel_id = os.environ.get(f"BUFFER_{service.upper()}_CHANNEL_ID", "")
+        if not token:
+            raise PlatformError(
+                "Buffer credentials missing — set BUFFER_ACCESS_TOKEN"
+                " (generate at publish.buffer.com/settings/api)"
+            )
+        if not channel_id:
+            raise PlatformError(
+                f"No channel id for {name!r} — set "
+                f"BUFFER_{service.upper()}_CHANNEL_ID (from `jarvis` or "
+                "Buffer's channel list)"
+            )
+        return BufferPlatform(service, channel_id, token)
+
     cls = _PLATFORMS.get(key)
     if cls is None:
         raise PlatformError(
-            f"Unknown platform {name!r}. Available: {sorted(set(_PLATFORMS))}"
+            f"Unknown platform {name!r}. Available: "
+            f"{sorted(set(_PLATFORMS))} or buffer:<service>"
         )
     return cls()
