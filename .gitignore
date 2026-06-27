@@ -130,3 +130,6 @@ learning.db
 minion_logs/
 *.oj-debug.json
 oj-debug.*.json
+
+# Social media manager — user config (not committed)
+examples/social_media_manager/profile.toml

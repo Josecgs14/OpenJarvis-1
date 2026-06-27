@@ -44,6 +44,33 @@ from store import (  # noqa: E402
 )
 
 
+def _load_env_file(path: Path) -> int:
+    """Load ``KEY=VALUE`` lines from a local ``.env`` into ``os.environ``.
+
+    Zero-dependency and forgiving: blank lines and ``#`` comments are
+    skipped, surrounding quotes are stripped, and existing environment
+    variables are never overwritten (a real ``export`` always wins). This
+    lets users drop their platform tokens in a file next to the agent
+    instead of exporting them by hand. Returns how many keys were set.
+    """
+    import os
+
+    if not path.exists():
+        return 0
+    count = 0
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            count += 1
+    return count
+
+
 @dataclass
 class Ctx:
     """Shared CLI state built once in the group callback."""
@@ -119,6 +146,13 @@ def _iso(dt: datetime) -> str:
     default=False,
     help="Print posts instead of publishing. No credentials needed.",
 )
+@click.option(
+    "--env-file",
+    "env_file",
+    default=str(_HERE / ".env"),
+    show_default=True,
+    help="File with platform tokens (KEY=VALUE per line). Never committed.",
+)
 @click.pass_context
 def cli(
     ctx,
@@ -127,8 +161,12 @@ def cli(
     model: Optional[str],
     engine_key: Optional[str],
     dry_run: bool,
+    env_file: str,
 ) -> None:
     """AI agent that plans, posts, measures, and tracks your social media."""
+    loaded = _load_env_file(Path(env_file))
+    if loaded:
+        click.echo(f"[info] loaded {loaded} credential(s) from {env_file}")
     path = Path(profile_path)
     if path.exists():
         profile = Profile.load(path)

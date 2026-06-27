@@ -57,7 +57,15 @@ config, e.g. Ollama).
 
 ## Going live
 
-Drop `--dry-run` and set credentials for the platforms in your profile:
+Drop `--dry-run` and provide credentials. The easiest way is a `.env` file
+next to the agent — copy `.env.example` to `.env`, paste your tokens, and the
+agent loads it automatically on every run (it's gitignored, never committed):
+
+```bash
+cp .env.example .env   # then edit .env with your tokens
+```
+
+Or export the variables in your shell instead:
 
 ```bash
 # X / Twitter (app with read+write permissions)
