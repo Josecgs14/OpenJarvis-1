@@ -142,6 +142,9 @@ jarvis scheduler start
 This sets up: publish due posts every 30 min · plan the week on Mondays ·
 weekly evaluation report on Sundays.
 
+**Running 24/7 on a server** (hands-off, your machine can be off) — Docker, a
+free GitHub Actions workflow, or plain cron: see [`deploy/`](deploy/README.md).
+
 ## Tests
 
 ```bash

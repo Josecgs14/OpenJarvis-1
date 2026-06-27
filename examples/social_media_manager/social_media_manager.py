@@ -130,8 +130,9 @@ def _iso(dt: datetime) -> str:
     "--db",
     "db_path",
     default=str(DEFAULT_DB_PATH),
+    envvar="SMM_DB",
     show_default=True,
-    help="Path to the SQLite state database.",
+    help="Path to the SQLite state database (env: SMM_DB).",
 )
 @click.option("--model", default=None, help="Model to use (e.g. qwen3:8b).")
 @click.option(
