@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import openjarvis.tools.trading as trading_module
 from openjarvis.core.registry import ToolRegistry
 from openjarvis.tools.trading import TradingTool
-import openjarvis.tools.trading as trading_module
 
 
 def _install_mock_alpaca(monkeypatch, client_instance=None):
@@ -348,7 +348,9 @@ class TestTradingPlaceOrderLive:
     def test_live_buy_blocked_by_daily_loss_limit(self, monkeypatch, tmp_path):
         monkeypatch.setenv("TRADING_LIVE_CONFIRMED", "true")
         state_path = tmp_path / "state.json"
-        state_path.write_text('{"baseline_date": "2024-01-01", "baseline_equity": 10000}')
+        state_path.write_text(
+            '{"baseline_date": "2024-01-01", "baseline_equity": 10000}'
+        )
 
         client = MagicMock()
         # 5% drop from baseline (10000 -> 9500), limit defaults to 3%
@@ -368,7 +370,9 @@ class TestTradingPlaceOrderLive:
             trading_module,
             "datetime",
             MagicMock(
-                now=lambda tz=None: __import__("datetime").datetime(2024, 1, 1, tzinfo=tz)
+                now=lambda tz=None: __import__("datetime").datetime(
+                    2024, 1, 1, tzinfo=tz
+                )
             ),
         )
 
@@ -382,7 +386,9 @@ class TestTradingPlaceOrderLive:
     def test_live_sell_allowed_during_daily_loss_breach(self, monkeypatch, tmp_path):
         monkeypatch.setenv("TRADING_LIVE_CONFIRMED", "true")
         state_path = tmp_path / "state.json"
-        state_path.write_text('{"baseline_date": "2024-01-01", "baseline_equity": 10000}')
+        state_path.write_text(
+            '{"baseline_date": "2024-01-01", "baseline_equity": 10000}'
+        )
 
         order = MagicMock(id="order-sell-1", status="accepted")
         client = MagicMock()
@@ -402,7 +408,9 @@ class TestTradingPlaceOrderLive:
             trading_module,
             "datetime",
             MagicMock(
-                now=lambda tz=None: __import__("datetime").datetime(2024, 1, 1, tzinfo=tz)
+                now=lambda tz=None: __import__("datetime").datetime(
+                    2024, 1, 1, tzinfo=tz
+                )
             ),
         )
 

@@ -152,7 +152,9 @@ class TestMarketDataHistory:
         monkeypatch.setitem(sys.modules, "yfinance", mock_yf)
 
         tool = MarketDataTool()
-        result = tool.execute(action="history", symbols="AAPL", period="1mo", interval="1d")
+        result = tool.execute(
+            action="history", symbols="AAPL", period="1mo", interval="1d"
+        )
         assert result.success is True
         assert "AAPL" in result.content
         assert "123.45" in result.content
