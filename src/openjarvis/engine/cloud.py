@@ -136,13 +136,15 @@ def _is_openai_reasoning_model(model: str) -> bool:
     return m == "gpt-5-mini" or m.startswith("gpt-5-mini-")
 
 
-def _is_unsupported_temperature_error(exc: Exception) -> bool:
+def _is_unsupported_temperature_error(exc: object) -> bool:
     """True if an OpenAI 400 says the model rejects a non-default temperature.
 
     Some models (e.g. gpt-5) only accept the default temperature and return
     ``code: unsupported_value`` for ``param: temperature`` (see #426). We
     can't enumerate every such model up front, so detect the error and retry
     without temperature — mirroring the tools-400 retry in the local engines.
+    Also used on raw HTTP response bodies (``resp.text``) by
+    :meth:`CloudEngine._generate_openai_http`.
     """
     message = str(exc).lower()
     if "temperature" not in message:
@@ -276,6 +278,7 @@ class CloudEngine(InferenceEngine):
 
     def __init__(self) -> None:
         self._openai_client: Any = None
+        self._openai_api_key: str | None = None
         self._anthropic_client: Any = None
         self._google_client: Any = None
         self._openrouter_client: Any = None
@@ -286,7 +289,8 @@ class CloudEngine(InferenceEngine):
         self._init_clients()
 
     def _init_clients(self) -> None:
-        if os.environ.get("OPENAI_API_KEY"):
+        self._openai_api_key = os.environ.get("OPENAI_API_KEY") or None
+        if self._openai_api_key:
             try:
                 import openai
 
@@ -510,6 +514,14 @@ class CloudEngine(InferenceEngine):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         if self._openai_client is None:
+            if self._openai_api_key:
+                return self._generate_openai_http(
+                    messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
             raise EngineConnectionError(
                 "OpenAI client not available — set "
                 "OPENAI_API_KEY and install "
@@ -586,6 +598,106 @@ class CloudEngine(InferenceEngine):
                     "arguments": tc.function.arguments,
                 }
                 for tc in choice.message.tool_calls
+            ]
+
+        return result
+
+    def _generate_openai_http(
+        self,
+        messages: Sequence[Message],
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Raw-HTTP fallback for ``/v1/chat/completions``.
+
+        Used when the ``openai`` package can't be imported — e.g. on
+        Termux, where its Rust-based deps ``jiter``/``pydantic-core`` have
+        no prebuilt wheels and fail to build from source.
+        """
+        response_format = kwargs.pop("response_format", None)
+        body: Dict[str, Any] = {
+            "model": model,
+            "messages": messages_to_dicts(messages),
+            "max_completion_tokens": max_tokens,
+            **kwargs,
+        }
+        if not _is_openai_reasoning_model(model):
+            body["temperature"] = temperature
+
+        if response_format is not None:
+            from openjarvis.engine._stubs import ResponseFormat
+
+            if isinstance(response_format, ResponseFormat):
+                if response_format.type == "json_schema" and response_format.schema:
+                    body["response_format"] = {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "response",
+                            "schema": response_format.schema,
+                        },
+                    }
+                else:
+                    body["response_format"] = {"type": "json_object"}
+            else:
+                body["response_format"] = response_format
+
+        base_url = os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        ).rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {self._openai_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        t0 = time.monotonic()
+        resp = httpx.post(
+            f"{base_url}/chat/completions", json=body, headers=headers, timeout=120.0
+        )
+        if (
+            resp.status_code == 400
+            and "temperature" in body
+            and _is_unsupported_temperature_error(resp.text)
+        ):
+            retry_body = {k: v for k, v in body.items() if k != "temperature"}
+            resp = httpx.post(
+                f"{base_url}/chat/completions",
+                json=retry_body,
+                headers=headers,
+                timeout=120.0,
+            )
+        resp.raise_for_status()
+        elapsed = time.monotonic() - t0
+        data = resp.json()
+
+        choice = data["choices"][0]
+        message = choice.get("message", {})
+        usage = data.get("usage") or {}
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        result: Dict[str, Any] = {
+            "content": message.get("content") or "",
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+            "model": data.get("model", model),
+            "finish_reason": choice.get("finish_reason") or "stop",
+            "cost_usd": estimate_cost(model, prompt_tokens, completion_tokens),
+            "ttft": elapsed,
+        }
+
+        if message.get("tool_calls"):
+            result["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "name": tc["function"]["name"],
+                    "arguments": tc["function"]["arguments"],
+                }
+                for tc in message["tool_calls"]
             ]
 
         return result
@@ -1436,7 +1548,7 @@ class CloudEngine(InferenceEngine):
 
     def list_models(self) -> List[str]:
         models: List[str] = []
-        if self._openai_client is not None:
+        if self._openai_client is not None or self._openai_api_key is not None:
             models.extend(_OPENAI_MODELS)
         if self._anthropic_client is not None:
             models.extend(_ANTHROPIC_MODELS)
@@ -1453,6 +1565,7 @@ class CloudEngine(InferenceEngine):
     def health(self) -> bool:
         return (
             self._openai_client is not None
+            or self._openai_api_key is not None
             or self._anthropic_client is not None
             or self._google_client is not None
             or self._openrouter_client is not None

@@ -1,0 +1,112 @@
+# Claude Remote Assistant — full-capability agent reachable via Telegram
+# Copy to ~/.openjarvis/config.toml and customize
+#
+# This wires up a persistent "operative" agent (identity: Claude) that you can
+# message from your phone over Telegram. It has tools for files, code, web
+# research, scheduling, memory, posting to connected channels, and market
+# data / brokerage access.
+#
+# ── Setup ─────────────────────────────────────────────────────────────────
+# 1. Create a Telegram bot: message @BotFather -> /newbot -> copy the token.
+#    export TELEGRAM_BOT_TOKEN="123456:abcdef..."
+#    Message your new bot once, then find your chat ID (e.g. via @userinfobot)
+#    and set [channel.telegram].allowed_chat_ids below (comma-separated,
+#    required — without it the bot ignores everyone).
+# 2. (Optional) Connect Gmail / Google Calendar:
+#      jarvis connect gmail
+#      jarvis connect gcalendar
+# 3. (Optional) Market data — no API key needed (uses yfinance):
+#      pip install "openjarvis[finance]"
+# 4. (Optional) Brokerage access via Alpaca — defaults to a PAPER
+#    (simulated-money) account:
+#      pip install "openjarvis[trading-alpaca]"
+#      export ALPACA_API_KEY="..."
+#      export ALPACA_SECRET_KEY="..."
+#      export ALPACA_PAPER=true        # set to "false" only when you're ready
+#                                       # for real money — see warnings below.
+# 5. Voice messages — talk to Claude with your voice on Telegram:
+#      pip install "openjarvis[speech]"   # local speech-to-text (faster-whisper)
+#    Send a voice note on Telegram and it's transcribed automatically, no
+#    config needed. voice_replies = true below means you also get a spoken
+#    reply back — pick a TTS backend:
+#      - local (no key needed):   pip install "openjarvis[speech]"  (kokoro)
+#      - cloud (OpenAI TTS):       export OPENAI_API_KEY="..."
+#      - cloud (Cartesia):         export CARTESIA_API_KEY="..."
+#    [speech].tts_backend = "auto" tries local-first, then cloud.
+# 5b. (Optional) Always-on local wake-word mode — say "Hola Claude" into
+#    your computer's microphone, hands-free, without opening Telegram:
+#      pip install "openjarvis[speech,speech-mic]"
+#      jarvis listen
+#    This is a separate local command (uses your PC's mic), independent
+#    of the Telegram channel above.
+# 6. Start everything:
+#      jarvis scheduler start &
+#      jarvis serve
+#
+# ── Live trading warning ─────────────────────────────────────────────────
+# The `trading` tool defaults to a paper account and refuses to place live
+# orders. To allow real-money trades you must explicitly set, in addition to
+# ALPACA_PAPER=false:
+#   export TRADING_LIVE_CONFIRMED=true
+#   export TRADING_MAX_ORDER_VALUE=500       # per-order cap in USD
+#   export TRADING_DAILY_LOSS_LIMIT_PCT=3    # blocks new buys after this drop
+#   export TRADING_ALLOWED_SYMBOLS="AAPL,MSFT"  # optional allowlist
+# Set TRADING_KILL_SWITCH=true (or create ~/.openjarvis/trading_disabled) at
+# any time to immediately stop all order placement.
+
+[engine]
+default = "ollama"
+
+[intelligence]
+default_model = "qwen3.5:9b"
+temperature = 0.4
+
+[agent]
+default_agent = "operative"
+max_turns = 25
+context_from_memory = true
+tools = "file_read,file_write,apply_patch,shell_exec,code_interpreter,web_search,calculator,market_data,trading,memory_store,memory_search,channel_send,think"
+
+[system_prompt]
+prefix = """
+You are Claude — the user's personal AI assistant, running locally through
+OpenJarvis across their devices (laptop, desktop, phone). You reach the user
+mainly through Telegram, so replies should read naturally as chat messages.
+
+You introduce yourself as Claude, never as "Jarvis" or any other name.
+
+You can read/write/edit files, run code and shell commands, search the web,
+manage email and calendar, schedule jobs, post to connected social channels,
+look up market data (`market_data`), and manage a brokerage account
+(`trading`). For trading, always check account/positions before placing
+orders, respect the configured paper/live mode and risk limits, and explain
+any safety limit that blocks an action instead of trying to work around it.
+Never fabricate prices, balances, news, or message content.
+"""
+
+[tools.storage]
+default_backend = "sqlite"
+
+[tools.mcp]
+enabled = true
+
+[channel]
+enabled = true
+default_agent = "operative"
+
+[channel.telegram]
+# bot_token = ""          # Or set TELEGRAM_BOT_TOKEN env var
+allowed_chat_ids = ""     # Required: your Telegram chat ID(s), comma-separated
+voice_replies = true      # Send a spoken reply whenever you send a voice note
+
+[speech]
+backend = "auto"          # Speech-to-text: "auto", "faster-whisper", "openai", "deepgram"
+tts_backend = "auto"      # Text-to-speech: "auto", "kokoro", "openai_tts", "cartesia"
+
+[scheduler]
+enabled = true
+
+[server]
+host = "0.0.0.0"
+port = 8000
+agent = "operative"

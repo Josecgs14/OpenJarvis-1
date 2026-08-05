@@ -1054,6 +1054,7 @@ class TelegramChannelConfig:
     bot_token: str = ""
     allowed_chat_ids: str = ""
     parse_mode: str = "Markdown"
+    voice_replies: bool = False
 
 
 @dataclass(slots=True)
@@ -1389,13 +1390,38 @@ class OperatorsConfig:
 
 @dataclass(slots=True)
 class SpeechConfig:
-    """Speech-to-text settings."""
+    """Speech-to-text and text-to-speech settings."""
 
     backend: str = "auto"  # "auto", "faster-whisper", "openai", "deepgram"
     model: str = "base"  # Whisper model size: tiny, base, small, medium, large-v3
     language: str = ""  # Empty = auto-detect
     device: str = "auto"  # "auto", "cpu", "cuda"
     compute_type: str = "float16"  # "float16", "int8", "float32"
+    tts_backend: str = "auto"  # "auto", "kokoro", "openai_tts", "cartesia"
+    tts_voice_id: str = ""  # Empty = backend default voice
+
+
+@dataclass(slots=True)
+class VoiceConfig:
+    """Always-on local wake-word listener (``jarvis listen``).
+
+    Lets you say a wake phrase (default "Hola Claude") into your computer's
+    microphone to open a hands-free voice session with the assistant —
+    similar to "Hey Google" / "Hey Siri". Requires a microphone and the
+    ``speech-mic`` extra (``pip install "openjarvis[speech-mic,speech]"``).
+    """
+
+    wake_phrases: List[str] = field(
+        default_factory=lambda: ["hola claude", "hey claude", "ok claude", "oye claude"]
+    )
+    speak_replies: bool = True
+    agent: str = ""  # Empty = agent.default_agent
+    silence_threshold: float = 0.02  # RMS amplitude (0-1) below which audio is silence
+    silence_duration: float = 1.0  # seconds of trailing silence that ends an utterance
+    max_utterance_seconds: float = 15.0
+    # Length of each recorded clip on Termux (Android), where the microphone
+    # is polled via short recordings rather than streamed continuously.
+    termux_chunk_seconds: float = 4.0
 
 
 @dataclass(slots=True)
@@ -1547,6 +1573,7 @@ class JarvisConfig:
     a2a: A2AConfig = field(default_factory=A2AConfig)
     operators: OperatorsConfig = field(default_factory=OperatorsConfig)
     speech: SpeechConfig = field(default_factory=SpeechConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     optimize: OptimizeConfig = field(default_factory=OptimizeConfig)
     agent_manager: AgentManagerConfig = field(default_factory=AgentManagerConfig)
     memory_files: MemoryFilesConfig = field(default_factory=MemoryFilesConfig)
@@ -1808,6 +1835,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "a2a",
             "operators",
             "speech",
+            "voice",
             "optimize",
             "agent_manager",
             "digest",
@@ -2158,6 +2186,7 @@ __all__ = [
     "ToolsConfig",
     "TracesConfig",
     "VLLMEngineConfig",
+    "VoiceConfig",
     "WebChatChannelConfig",
     "WebhookChannelConfig",
     "WhatsAppBaileysChannelConfig",

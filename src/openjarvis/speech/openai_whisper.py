@@ -6,6 +6,8 @@ import io
 import os
 from typing import List, Optional
 
+import httpx
+
 from openjarvis.core.registry import SpeechRegistry
 from openjarvis.speech._stubs import SpeechBackend, TranscriptionResult
 
@@ -36,6 +38,8 @@ class OpenAIWhisperBackend(SpeechBackend):
     ) -> TranscriptionResult:
         """Transcribe audio using OpenAI's Whisper API."""
         if self._client is None:
+            if self._api_key:
+                return self._transcribe_http(audio, format=format, language=language)
             raise RuntimeError("OpenAI client not initialized (missing API key?)")
 
         ext = format if not format.startswith(".") else format[1:]
@@ -57,8 +61,49 @@ class OpenAIWhisperBackend(SpeechBackend):
             segments=[],
         )
 
+    def _transcribe_http(
+        self,
+        audio: bytes,
+        *,
+        format: str,
+        language: Optional[str],
+    ) -> TranscriptionResult:
+        """Raw-HTTP fallback for ``/v1/audio/transcriptions``.
+
+        Used when the ``openai`` package can't be imported — e.g. on
+        Termux, where its Rust-based deps ``jiter``/``pydantic-core`` have
+        no prebuilt wheels and fail to build from source.
+        """
+        ext = format if not format.startswith(".") else format[1:]
+        base_url = os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1"
+        ).rstrip("/")
+        data = {"model": "whisper-1", "response_format": "verbose_json"}
+        if language:
+            data["language"] = language
+        files = {"file": (f"audio.{ext}", audio)}
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+
+        resp = httpx.post(
+            f"{base_url}/audio/transcriptions",
+            data=data,
+            files=files,
+            headers=headers,
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+
+        return TranscriptionResult(
+            text=result.get("text", ""),
+            language=result.get("language"),
+            confidence=None,
+            duration_seconds=result.get("duration", 0.0),
+            segments=[],
+        )
+
     def health(self) -> bool:
-        return self._client is not None and bool(self._api_key)
+        return bool(self._api_key)
 
     def supported_formats(self) -> List[str]:
         return ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"]

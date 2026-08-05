@@ -11,6 +11,7 @@ def _telegram(c: Any) -> Dict[str, Any]:
         kw["bot_token"] = c.bot_token
     if c.parse_mode:
         kw["parse_mode"] = c.parse_mode
+    kw["voice_replies"] = c.voice_replies
     return kw
 
 

@@ -206,6 +206,102 @@ class TestOpenAIUnsupportedTemperatureRetry:
 
 
 # ---------------------------------------------------------------------------
+# Raw-HTTP fallback when the `openai` package isn't installed (e.g. Termux,
+# where its Rust-based deps jiter/pydantic-core have no prebuilt wheels).
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateOpenAIHttpFallback:
+    def _engine_without_sdk(self, monkeypatch: pytest.MonkeyPatch) -> CloudEngine:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with mock.patch.dict("sys.modules", {"openai": None}):
+            engine = CloudEngine()
+        assert engine._openai_client is None
+        assert engine._openai_api_key == "sk-test"
+        return engine
+
+    def test_health_true_without_sdk(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = self._engine_without_sdk(monkeypatch)
+        assert engine.health() is True
+
+    def test_list_models_includes_openai_without_sdk(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine = self._engine_without_sdk(monkeypatch)
+        assert "gpt-4o" in engine.list_models()
+
+    def test_generate_uses_raw_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        engine = self._engine_without_sdk(monkeypatch)
+
+        fake_response = mock.MagicMock()
+        fake_response.status_code = 200
+        fake_response.json.return_value = {
+            "choices": [
+                {"message": {"content": "Hello via HTTP!"}, "finish_reason": "stop"}
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            "model": "gpt-4o",
+        }
+        fake_response.raise_for_status = mock.MagicMock()
+
+        with mock.patch(
+            "openjarvis.engine.cloud.httpx.post", return_value=fake_response
+        ) as mock_post:
+            result = engine.generate(
+                [Message(role=Role.USER, content="Hi")], model="gpt-4o"
+            )
+
+        assert result["content"] == "Hello via HTTP!"
+        assert result["usage"]["prompt_tokens"] == 7
+        assert result["usage"]["total_tokens"] == 10
+
+        sent = mock_post.call_args.kwargs["json"]
+        assert sent["model"] == "gpt-4o"
+        assert sent["messages"] == [{"role": "user", "content": "Hi"}]
+        headers = mock_post.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer sk-test"
+
+    def test_retries_without_temperature_on_unsupported_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine = self._engine_without_sdk(monkeypatch)
+
+        bad_response = mock.MagicMock()
+        bad_response.status_code = 400
+        bad_response.text = (
+            "{\"error\": {\"message\": \"Unsupported value: 'temperature' "
+            "does not support 0.7 with this model. Only the default (1) "
+            "value is supported.\", \"param\": \"temperature\", "
+            "\"code\": \"unsupported_value\"}}"
+        )
+
+        good_response = mock.MagicMock()
+        good_response.status_code = 200
+        good_response.json.return_value = {
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "model": "gpt-5",
+        }
+        good_response.raise_for_status = mock.MagicMock()
+
+        with mock.patch(
+            "openjarvis.engine.cloud.httpx.post",
+            side_effect=[bad_response, good_response],
+        ) as mock_post:
+            result = engine.generate(
+                [Message(role=Role.USER, content="Hi")],
+                model="gpt-5",
+                temperature=0.7,
+            )
+
+        assert result["content"] == "ok"
+        assert mock_post.call_count == 2
+        assert "temperature" in mock_post.call_args_list[0].kwargs["json"]
+        assert "temperature" not in mock_post.call_args_list[1].kwargs["json"]
+
+
+# ---------------------------------------------------------------------------
 # Codex provider support (OpenAI Responses API)
 # ---------------------------------------------------------------------------
 
